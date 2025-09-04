@@ -36,8 +36,8 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-from rsl_rl.algorithms import PPO
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
+from rsl_rl.algorithms import PPODreamWaQ
+from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, ActorCriticAsymmetric
 from rsl_rl.env import VecEnv
 
 
@@ -58,13 +58,13 @@ class OnPolicyRunner:
             num_critic_obs = self.env.num_privileged_obs 
         else:
             num_critic_obs = self.env.num_obs
-        actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
-        actor_critic: ActorCritic = actor_critic_class( self.env.num_obs,
+        actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCriticAsymmetric
+        actor_critic: ActorCriticAsymmetric = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
                                                         self.env.num_actions,
                                                         **self.policy_cfg).to(self.device)
-        alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        alg_class = eval(self.cfg["algorithm_class_name"]) # PPODreamWaQ
+        self.alg: PPODreamWaQ = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
 
@@ -86,10 +86,15 @@ class OnPolicyRunner:
             self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
+        # Observations
         obs = self.env.get_observations()
+        obs_history = self.env.get_observations_history()
         privileged_obs = self.env.get_privileged_observations()
         critic_obs = privileged_obs if privileged_obs is not None else obs
-        obs, critic_obs = obs.to(self.device), critic_obs.to(self.device)
+        obs, critic_obs, obs_history = obs.to(self.device), critic_obs.to(self.device), obs_history.to(self.device)
+
+        # Output from CENet
+        velocity, latent = self.actor_critic.cenet(obs_history)
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
         ep_infos = []
@@ -104,10 +109,12 @@ class OnPolicyRunner:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, critic_obs)
-                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
+                    actions = self.alg.act(obs, velocity, latent, critic_obs)
+                    velocity, latent = self.actor_critic.cenet(obs_history)
+                    
+                    obs, privileged_obs, obs_history, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    obs, critic_obs, obs_history, rewards, dones = obs.to(self.device), critic_obs.to(self.device), obs_history.to(self.device), rewards.to(self.device), dones.to(self.device)
                     self.alg.process_env_step(rewards, dones, infos)
                     
                     if self.log_dir is not None:

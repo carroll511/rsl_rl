@@ -62,6 +62,7 @@ class OnPolicyRunner:
         actor_critic: ActorCriticAsymmetric = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
                                                         self.env.num_actions,
+                                                        self.env.history_len,
                                                         **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPODreamWaQ
         self.alg: PPODreamWaQ = alg_class(actor_critic, device=self.device, **self.alg_cfg)
@@ -94,7 +95,7 @@ class OnPolicyRunner:
         obs, critic_obs, obs_history = obs.to(self.device), critic_obs.to(self.device), obs_history.to(self.device)
 
         # Output from CENet
-        velocity, latent = self.actor_critic.cenet(obs_history)
+        velocity, latent = self.actor_critic.encoder(obs_history)
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
         ep_infos = []
@@ -110,7 +111,7 @@ class OnPolicyRunner:
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, velocity, latent, critic_obs)
-                    velocity, latent = self.actor_critic.cenet(obs_history)
+                    velocity, latent = self.actor_critic.encoder(obs_history)
                     
                     obs, privileged_obs, obs_history, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs

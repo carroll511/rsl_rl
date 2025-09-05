@@ -138,7 +138,10 @@ class PPODreamWaQ:
                 else:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+                # CENet loss
+                
+
+                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + self.cenet_coef * cenet_loss
 
                 # Gradient step
                 self.optimizer.zero_grad()

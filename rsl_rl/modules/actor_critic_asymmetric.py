@@ -2,8 +2,8 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.distributions import Normal
-from torch.nn.modules import rnn
 
 class ActorCriticAsymmetric(nn.Module):
     is_recurrent = False
@@ -25,9 +25,6 @@ class ActorCriticAsymmetric(nn.Module):
 
         mlp_input_dim_a = num_actor_obs + velocity_dim + latent_dim
         mlp_input_dim_c = num_critic_obs
-
-        # CENet
-        
 
         # Policy
         actor_layers = []
@@ -79,6 +76,7 @@ class ActorCriticAsymmetric(nn.Module):
     def forward(self):
         raise NotImplementedError
     
+    
     @property
     def action_mean(self):
         return self.distribution.mean
@@ -92,7 +90,7 @@ class ActorCriticAsymmetric(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations, velocity, latent):
-        mean = self.actor(observations)
+        mean = self.actor(observations, velocity, latent)
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, velocity, latent):
@@ -102,13 +100,84 @@ class ActorCriticAsymmetric(nn.Module):
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
-    def act_inference(self, observations):
-        actions_mean = self.actor(observations)
+    def act_inference(self, observations, velocity, latent):
+        actions_mean = self.actor(observations, velocity, latent)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
         return value
+    
+class CENet(torch.nn.Module):
+    def __init__(self,  num_actor_obs,
+                        history_len,
+                        velocity_dim=3,
+                        latent_dim=16,
+                        num_heads=2, # velocity + latent
+                        encoder_hidden_dims=[128, 64],
+                        decoder_hidden_dims=[64, 128],
+                        beta=0.4, # Need to be revised
+                        activation='elu',
+                        init_noise_std=1.0,
+                        **kwargs):
+        if kwargs:
+            print("CENet.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+        super(CENet, self).__init__()
+        
+        self.latent_dim = latent_dim
+        self.velocity_dim = velocity_dim
+        self.beta = beta
+
+        mlp_input_dim_e = num_actor_obs * history_len
+        mlp_input_dim_a = num_actor_obs
+
+        # CENet - Encoder
+        encoder_layers = []
+        encoder_layers.append(nn.Linear(mlp_input_dim_e, encoder_hidden_dims[0]))
+        encoder_layers.append(activation)
+        for l in range(len(encoder_hidden_dims)):
+            if l == len(encoder_hidden_dims) - 1:
+                encoder_layers.append(nn.Linear(encoder_hidden_dims[l], velocity_dim + latent_dim))
+            else:
+                encoder_layers.append(nn.Linear(encoder_hidden_dims[l], encoder_hidden_dims[l + 1]))
+                encoder_layers.append(activation)
+        self.encoder = nn.Sequential(*encoder_layers) # Context vector
+
+        # CENet - Multihead Decoder
+        # Head 1: velocity
+        velocity_layers = []
+        velocity_layers.append(nn.Linear(velocity_dim, decoder_hidden_dims[0]))
+        velocity_layers.append(activation)
+        for l in range(len(decoder_hidden_dims)):
+            if l == len(decoder_hidden_dims) - 1:
+                velocity_layers.append(nn.Linear(decoder_hidden_dims[l], mlp_input_dim_a))
+            else:
+                velocity_layers.append(nn.Linear(decoder_hidden_dims[l], decoder_hidden_dims[l + 1]))
+                velocity_layers.append(activation)
+        self.velocity_head = nn.Sequential(*velocity_layers)
+
+        # Head 2: latent
+        latent_layers = []
+        latent_layers.append(nn.Linear(latent_dim, decoder_hidden_dims[0]))
+        latent_layers.append(activation)
+        for l in range(len(decoder_hidden_dims)):
+            if l == len(decoder_hidden_dims) - 1:
+                latent_layers.append(nn.Linear(decoder_hidden_dims[l], mlp_input_dim_a))
+            else:
+                latent_layers.append(nn.Linear(decoder_hidden_dims[l], decoder_hidden_dims[l + 1]))
+                latent_layers.append(activation)
+        self.latent_head = nn.Sequential(*latent_layers)
+
+        self.decoder = nn.Linear(num_heads * mlp_input_dim_a, mlp_input_dim_a)
+
+    def forward(self):
+        pass
+
+    def compute_loss(self):
+        pass
+
+
+
 
 def get_activation(act_name):
     if act_name == "elu":

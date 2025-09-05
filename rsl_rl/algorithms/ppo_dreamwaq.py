@@ -94,7 +94,7 @@ class PPODreamWaQ:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
+        for obs_batch, critic_obs_batch, history_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
 
@@ -139,7 +139,8 @@ class PPODreamWaQ:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 # CENet loss
-                
+                v_enc, z_enc, mu, logvar, recon = self.actor_critic.cenet(history_obs_batch)
+                # cenet_loss = self.actor_critic.cenet.compute_loss(v_enc, )
 
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + self.cenet_coef * cenet_loss
 

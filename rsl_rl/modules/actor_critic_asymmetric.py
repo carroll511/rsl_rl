@@ -10,6 +10,7 @@ class ActorCriticAsymmetric(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
                         num_actions,
+                        history_len,
                         velocity_dim=3,
                         latent_dim=16,
                         actor_hidden_dims=[512, 256, 128],
@@ -25,6 +26,8 @@ class ActorCriticAsymmetric(nn.Module):
 
         mlp_input_dim_a = num_actor_obs + velocity_dim + latent_dim
         mlp_input_dim_c = num_critic_obs
+
+        self.cenet = CENet(num_actor_obs, history_len)
 
         # Policy
         actor_layers = []
@@ -143,6 +146,10 @@ class CENet(torch.nn.Module):
                 encoder_layers.append(activation)
         self.encoder = nn.Sequential(*encoder_layers) # Context vector
 
+        # For VAE
+        self.fc_mu = nn.Linear(velocity_dim + latent_dim, velocity_dim + latent_dim)
+        self.fc_logvar = nn.Linear(velocity_dim + latent_dim, velocity_dim + latent_dim)
+
         # CENet - Multihead Decoder
         # Head 1: velocity
         velocity_layers = []
@@ -170,11 +177,33 @@ class CENet(torch.nn.Module):
 
         self.decoder = nn.Linear(num_heads * mlp_input_dim_a, mlp_input_dim_a)
 
-    def forward(self):
-        pass
+    def forward(self, history_obs):
+        h = self.encoder(history_obs)
 
-    def compute_loss(self):
-        pass
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+
+        z = mu + eps * std # reparameterization
+
+        v_enc, z_enc = torch.split(z, [self.velocity_dim, self.latent_dim], dim=-1)
+        v_out = self.velocity_head(v_enc)
+        z_out = self.latent_head(z_enc)
+        obs_est = self.decoder(torch.cat((v_out, z_out), dim=-1))
+
+        return v_enc, z_enc, obs_est, mu, logvar
+
+    def compute_loss(self, v_est, v_truth, obs_est, obs_truth, mu, logvar):
+        # body velocity estimation loss
+        est_loss = F.mse_loss(v_est, v_truth, reduction='mean')
+
+        # VAE loss
+        recon_loss = F.mse_loss(obs_est, obs_truth, reduction='mean')
+        kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        vae_loss = recon_loss + self.beta * kl_loss
+
+        return est_loss + vae_loss
 
 
 

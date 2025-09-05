@@ -9,6 +9,7 @@ class PPODreamWaQ:
     actor_critic: ActorCriticAsymmetric
     def __init__(self,
                  actor_critic,
+                 cenet_coef=1.0,
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -48,8 +49,10 @@ class PPODreamWaQ:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
-    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
-        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
+        self.cenet_coef = cenet_coef
+
+    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, history_obs_shape, velocity_truth_shape, action_shape):
+        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, history_obs_shape, velocity_truth_shape, action_shape, self.device)
 
     def test_mode(self):
         self.actor_critic.test()
@@ -57,7 +60,7 @@ class PPODreamWaQ:
     def train_mode(self):
         self.actor_critic.train()
 
-    def act(self, obs, velocity, latent, critic_obs):
+    def act(self, obs, velocity, latent, critic_obs, history_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
@@ -69,11 +72,13 @@ class PPODreamWaQ:
         # need to record obs and critic_obs before env.step()
         self.transition.observations = obs
         self.transition.critic_observations = critic_obs
+        self.transition.history_observations = history_obs
         return self.transition.actions
     
-    def process_env_step(self, rewards, dones, infos):
+    def process_env_step(self, rewards, dones, infos, velocity_truth):
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
+        self.transition.velocity_truth = velocity_truth.clone()
         # Bootstrapping on time outs
         if 'time_outs' in infos:
             self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
@@ -94,11 +99,12 @@ class PPODreamWaQ:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, history_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
+        for obs_batch, critic_obs_batch, history_obs_batch, velocity_truth_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
+                v_est, z_est = self.actor_critic.cenet.encode(history_obs_batch)
 
-                self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
+                self.actor_critic.act(obs_batch, v_est, z_est, masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 mu_batch = self.actor_critic.action_mean
@@ -139,8 +145,12 @@ class PPODreamWaQ:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 # CENet loss
-                v_enc, z_enc, mu, logvar, recon = self.actor_critic.cenet(history_obs_batch)
-                # cenet_loss = self.actor_critic.cenet.compute_loss(v_enc, )
+                v_truth = velocity_truth_batch
+                obs_truth = obs_batch
+
+                history_obs_batch = history_obs_batch.reshape(history_obs_batch.shape[0], -1)
+                v_est, _, obs_est, mu, logvar = self.actor_critic.cenet(history_obs_batch)
+                cenet_loss = self.actor_critic.cenet.compute_loss(v_est, v_truth, obs_est, obs_truth, mu, logvar)
 
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + self.cenet_coef * cenet_loss
 

@@ -53,8 +53,8 @@ class ActorCriticAsymmetric(nn.Module):
                 critic_layers.append(activation)
         self.critic = nn.Sequential(*critic_layers)
 
-        print(f"Actor MLP: {self.actor}")
-        print(f"Critic MLP: {self.critic}")
+        print(f"[Asymmetric] Actor MLP: {self.actor}")
+        print(f"[Asymmetric] Critic MLP: {self.critic}")
 
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
@@ -93,10 +93,10 @@ class ActorCriticAsymmetric(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations, velocity, latent):
-        mean = self.actor(observations, velocity, latent)
+        mean = self.actor(torch.cat([observations, velocity, latent], dim=-1))
         self.distribution = Normal(mean, mean*0. + self.std)
 
-    def act(self, observations, velocity, latent):
+    def act(self, observations, velocity, latent, **kwargs):
         self.update_distribution(observations, velocity, latent)
         return self.distribution.sample()
     
@@ -130,6 +130,8 @@ class CENet(torch.nn.Module):
         self.latent_dim = latent_dim
         self.velocity_dim = velocity_dim
         self.beta = beta
+
+        activation = get_activation(activation)
 
         mlp_input_dim_e = num_actor_obs * history_len
         mlp_input_dim_a = num_actor_obs
@@ -193,6 +195,11 @@ class CENet(torch.nn.Module):
         obs_est = self.decoder(torch.cat((v_out, z_out), dim=-1))
 
         return v_enc, z_enc, obs_est, mu, logvar
+    
+    def encode(self, history_obs):
+        z = self.encoder(history_obs)
+        v_enc, z_enc = torch.split(z, [self.velocity_dim, self.latent_dim], dim=-1)
+        return v_enc, z_enc
 
     def compute_loss(self, v_est, v_truth, obs_est, obs_truth, mu, logvar):
         # body velocity estimation loss

@@ -70,7 +70,7 @@ class OnPolicyRunner:
         self.save_interval = self.cfg["save_interval"]
 
         # init storage and model
-        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions])
+        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.history_len * self.env.num_obs], [3], [self.env.num_actions])
 
         # Log
         self.log_dir = log_dir
@@ -79,7 +79,7 @@ class OnPolicyRunner:
         self.tot_time = 0
         self.current_learning_iteration = 0
 
-        _, _ = self.env.reset()
+        _, _, _, _ = self.env.reset()
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
@@ -91,11 +91,12 @@ class OnPolicyRunner:
         obs = self.env.get_observations()
         obs_history = self.env.get_observations_history()
         privileged_obs = self.env.get_privileged_observations()
+        velocity_truth = self.env.get_velocity_truth()
         critic_obs = privileged_obs if privileged_obs is not None else obs
-        obs, critic_obs, obs_history = obs.to(self.device), critic_obs.to(self.device), obs_history.to(self.device)
+        obs, critic_obs, obs_history, velocity_truth = obs.to(self.device), critic_obs.to(self.device), obs_history.to(self.device), velocity_truth.to(self.device)
 
         # Output from CENet
-        velocity, latent = self.actor_critic.encoder(obs_history)
+        velocity, latent = self.alg.actor_critic.cenet.encode(obs_history)
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
         ep_infos = []
@@ -110,13 +111,13 @@ class OnPolicyRunner:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, velocity, latent, critic_obs)
-                    velocity, latent = self.actor_critic.encoder(obs_history)
-                    
-                    obs, privileged_obs, obs_history, rewards, dones, infos = self.env.step(actions)
+                    actions = self.alg.act(obs, velocity, latent, critic_obs, obs_history)
+                    velocity, latent = self.alg.actor_critic.cenet.encode(obs_history)
+
+                    obs, privileged_obs, obs_history, velocity_truth, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, obs_history, rewards, dones = obs.to(self.device), critic_obs.to(self.device), obs_history.to(self.device), rewards.to(self.device), dones.to(self.device)
-                    self.alg.process_env_step(rewards, dones, infos)
+                    obs, critic_obs, obs_history, velocity_truth, rewards, dones = obs.to(self.device), critic_obs.to(self.device), obs_history.to(self.device), velocity_truth.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    self.alg.process_env_step(rewards, dones, infos, velocity_truth)
                     
                     if self.log_dir is not None:
                         # Book keeping

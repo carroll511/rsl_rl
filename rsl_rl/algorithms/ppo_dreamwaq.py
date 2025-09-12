@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from rsl_rl.modules import ActorCriticAsymmetric
+from rsl_rl.modules import ActorCriticDreamWaQ
 from rsl_rl.storage import RolloutStorage
 
 class PPODreamWaQ:
-    actor_critic: ActorCriticAsymmetric
+    actor_critic: ActorCriticDreamWaQ
     def __init__(self,
                  actor_critic,
                  cenet_coef=1.0,

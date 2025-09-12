@@ -30,4 +30,4 @@
 
 from .actor_critic import ActorCritic
 from .actor_critic_recurrent import ActorCriticRecurrent
-from .actor_critic_asymmetric import ActorCriticAsymmetric
+from .actor_critic_dreamwaq import ActorCriticDreamWaQ

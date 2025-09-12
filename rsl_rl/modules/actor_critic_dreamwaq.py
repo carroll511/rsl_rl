@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-class ActorCriticAsymmetric(nn.Module):
+class ActorCriticDreamWaQ(nn.Module):
     is_recurrent = False
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
@@ -19,8 +19,8 @@ class ActorCriticAsymmetric(nn.Module):
                         init_noise_std=1.0,
                         **kwargs):
         if kwargs:
-            print("ActorCriticAsymmetric.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
-        super(ActorCriticAsymmetric, self).__init__()
+            print("ActorCriticDreamWaQ.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+        super(ActorCriticDreamWaQ, self).__init__()
 
         activation = get_activation(activation)
 
@@ -211,9 +211,6 @@ class CENet(torch.nn.Module):
         vae_loss = recon_loss + self.beta * kl_loss
 
         return est_loss + vae_loss
-
-
-
 
 def get_activation(act_name):
     if act_name == "elu":

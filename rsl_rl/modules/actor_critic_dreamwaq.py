@@ -28,10 +28,8 @@ class ActorCriticDreamWaQ(nn.Module):
         cenet_input_dim = num_actor_obs * history_len
         self.cenet_encoder = nn.Sequential(
             nn.Linear(cenet_input_dim, 128),
-            nn.LayerNorm(128),
             activation,
             nn.Linear(128, 64),
-            nn.LayerNorm(64),
             activation,
             nn.Linear(64, 19)
         )
@@ -114,30 +112,7 @@ class ActorCriticDreamWaQ(nn.Module):
     def forward(self, history_observations):
         batch_size = history_observations.shape[0]
         history_observations_flat = history_observations.view(batch_size, -1)
-        print("history min:", history_observations_flat.min().item(),
-              "max:", history_observations_flat.max().item(),
-              "mean:", history_observations_flat.mean().item(),
-              "shape:", history_observations_flat.shape)
-
-        # 첫 Linear 레이어 weight/bias 상태 확인
-        first_linear = self.cenet_encoder[0]
-        w, b = first_linear.weight, first_linear.bias
-        print("First Linear weight has NaN:", torch.isnan(w).any().item(),
-              "bias has NaN:", torch.isnan(b).any().item())
-        print("First Linear weight abs max:", w.abs().max().item(),
-              "bias abs max:", b.abs().max().item())
-
-        # 레이어별 NaN 추적
-        x = history_observations_flat
-        for i, layer in enumerate(self.cenet_encoder):
-            x = layer(x)
-            if torch.isnan(x).any() or torch.isinf(x).any():
-                print(f"[NaN detected] After layer {i}: {layer}")
-                print("min:", x.min().item(), "max:", x.max().item(), "mean:", x.mean().item())
-                break
         encoded = self.cenet_encoder(history_observations_flat)
-        if torch.isnan(encoded).any():
-            print("encoded has nan!") # ppppp
 
         predicted_velocity = self.velocity_head(encoded)
         latent_mu = self.latent_mu_head(encoded)
@@ -172,12 +147,6 @@ class ActorCriticDreamWaQ(nn.Module):
     def act(self, observations, history_observations, **kwargs):
 
         predicted_velocity, z, _, _, _ = self.forward(history_observations)
-        # if torch.isnan(observations).any():
-        #     print("observations has nan!")
-        if torch.isnan(predicted_velocity).any():
-            print("predicted_velocity has nan!")
-        if torch.isnan(z).any():
-            print("z has nan!")
         actor_input = torch.cat([observations, predicted_velocity, z], dim=-1)
 
         self.update_distribution(actor_input)

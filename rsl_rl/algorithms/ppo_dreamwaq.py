@@ -11,7 +11,7 @@ class PPODreamWaQ:
     def __init__(self,
                  actor_critic,
                  num_learning_epochs=1,
-                 num_mini_batches=1,
+                 num_mini_batches=48,
                  clip_param=0.2,
                  gamma=0.998,
                  lam=0.95,
@@ -108,8 +108,7 @@ class PPODreamWaQ:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, history_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, velocity_targets_batch, next_obs_batch in generator:
-
-
+            
                 self.actor_critic.act(obs_batch, history_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])

@@ -36,6 +36,7 @@ from typing import Tuple, Union
 class VecEnv(ABC):
     num_envs: int
     num_obs: int
+    history_len: int
     num_privileged_obs: int
     num_actions: int
     max_episode_length: int
@@ -57,4 +58,7 @@ class VecEnv(ABC):
         pass
     @abstractmethod
     def get_privileged_observations(self) -> Union[torch.Tensor, None]:
+        pass
+    @abstractmethod
+    def get_history_observations(self) -> torch.Tensor:
         pass

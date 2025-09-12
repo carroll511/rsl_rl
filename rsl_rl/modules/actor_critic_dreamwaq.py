@@ -36,15 +36,26 @@ class ActorCriticDreamWaQ(nn.Module):
 
         self.velocity_head = nn.Linear(19, velocity_dims)
         self.latent_mu_head = nn.Linear(19, latent_dims)
-        self.latent_log_std_head = nn.Linear(19, latent_dims)
+        self.latent_logvar_head = nn.Linear(19, latent_dims)
+
+        self.velocity_decoder = nn.Sequential(
+            nn.Linear(velocity_dims, 64),
+            activation,
+            nn.Linear(64, num_actor_obs)
+        )
+
+        self.latent_decoder = nn.Sequential(
+            nn.Linear(latent_dims, 64),
+            activation,
+            nn.Linear(64, num_actor_obs)
+        )
 
         self.cenet_decoder = nn.Sequential(
-            nn.Linear(velocity_dims + latent_dims, 64),
+            nn.Linear(num_actor_obs * 2, 128),
             activation,
-            nn.Linear(64, 128),
-            activation,
-            nn.Linear(128, 45)
+            nn.Linear(128, num_actor_obs)
         )
+
         print(f"[DreamWaQ] CENet Encoder: {self.cenet_encoder}")
         print(f"[DreamWaQ] CENet Decoder: {self.cenet_decoder}")
 
@@ -105,16 +116,17 @@ class ActorCriticDreamWaQ(nn.Module):
 
         predicted_velocity = self.velocity_head(encoded)
         latent_mu = self.latent_mu_head(encoded)
-        latent_log_std = self.latent_log_std_head(encoded)
-        logvar = 2 * latent_log_std
+        latent_logvar = torch.clamp(self.latent_logvar_head(encoded), -10, 10)
 
-        latent_std = torch.exp(0.5 * logvar)
+        latent_std = torch.exp(0.5 * latent_logvar)
         eps = torch.randn_like(latent_std)
         z = latent_mu + eps * latent_std
 
-        reconstructed_next_obs = self.cenet_decoder(torch.cat([predicted_velocity, z], dim=-1))
+        v_decoded = self.velocity_decoder(predicted_velocity)
+        z_decoded = self.latent_decoder(z)
+        reconstructed_next_obs = self.cenet_decoder(torch.cat([v_decoded, z_decoded], dim=-1))
 
-        return predicted_velocity, reconstructed_next_obs, latent_mu, logvar
+        return predicted_velocity, z, reconstructed_next_obs, latent_mu, latent_logvar
 
     @property
     def action_mean(self):
@@ -133,12 +145,8 @@ class ActorCriticDreamWaQ(nn.Module):
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, history_observations, **kwargs):
-        flattened_history = history_observations.view(history_observations.shape[0], -1)
-        cenet_features = self.cenet_encoder(flattened_history)
-        predicted_velocity = self.velocity_head(cenet_features)
-        latent_mu = self.latent_mu_head(cenet_features)
-        z = latent_mu
 
+        predicted_velocity, z, _, _, _ = self.forward(history_observations)
         actor_input = torch.cat([observations, predicted_velocity, z], dim=-1)
   
         self.update_distribution(actor_input)

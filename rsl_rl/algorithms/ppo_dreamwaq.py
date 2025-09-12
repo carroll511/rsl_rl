@@ -17,13 +17,13 @@ class PPODreamWaQ:
                  lam=0.95,
                  value_loss_coef=1.0,
                  entropy_coef=0.0,
-                 learning_rate=1e-3,
+                 learning_rate=1e-4,
                  max_grad_norm=1.0,
                  use_clipped_value_loss=True,
                  schedule="fixed",
                  desired_kl=0.01,
                  device='cpu',
-                 kl_loss_coef=0.001,
+                 kl_loss_coef=1e-4,
                  ):
 
         self.device = device
@@ -117,7 +117,7 @@ class PPODreamWaQ:
                 sigma_batch = self.actor_critic.action_std
                 entropy_batch = self.actor_critic.entropy
 
-                predicted_velocity_batch, reconstructed_next_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
+                predicted_velocity_batch, _, reconstructed_next_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
 
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':
@@ -153,8 +153,8 @@ class PPODreamWaQ:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 # CENet loss
-                velocity_loss = F.mse_loss(predicted_velocity_batch, velocity_targets_batch)
-                recon_loss = F.mse_loss(reconstructed_next_obs_batch, next_obs_batch)
+                velocity_loss = F.mse_loss(predicted_velocity_batch, velocity_targets_batch, reduction='mean')
+                recon_loss = F.mse_loss(reconstructed_next_obs_batch, next_obs_batch, reduction='mean')
                 kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
                 ce_loss = velocity_loss + recon_loss + kl_loss * self.kl_loss_coef
 

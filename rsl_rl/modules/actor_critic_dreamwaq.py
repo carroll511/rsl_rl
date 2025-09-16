@@ -155,8 +155,10 @@ class ActorCriticDreamWaQ(nn.Module):
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
-    def act_inference(self, observations):
-        actions_mean = self.actor(observations)
+    def act_inference(self, observations, history_observations):
+        predicted_velocity, z, _, _, _ = self.forward(history_observations)
+        actor_input = torch.cat([observations, predicted_velocity, z], dim=-1)
+        actions_mean = self.actor(actor_input)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):

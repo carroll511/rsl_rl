@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from rsl_rl.modules import ActorCritic, ActorCriticDreamWaQ
 from rsl_rl.storage import RolloutStorage
 
+from collections import deque
+
 class PPODreamWaQ:
     actor_critic: ActorCriticDreamWaQ
     def __init__(self,
@@ -39,7 +41,7 @@ class PPODreamWaQ:
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
         self.transition = RolloutStorage.Transition()
 
-        # PPO parameters
+        # PPO parametersa
         self.clip_param = clip_param
         self.num_learning_epochs = num_learning_epochs
         self.num_mini_batches = num_mini_batches
@@ -52,6 +54,8 @@ class PPODreamWaQ:
 
         # CENet parameters
         self.kl_loss_coef = kl_loss_coef
+
+        self.episode_reward_window = deque(maxlen=100)
 
     def init_storage(self, num_envs, num_transitions_per_env, history_len, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, history_len, actor_obs_shape, critic_obs_shape, action_shape, self.device)

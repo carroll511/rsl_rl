@@ -50,6 +50,8 @@ class OnPolicyRunnerDreamWaQ:
         self.current_learning_iteration = 0
 
         _, _, _ = self.env.reset()
+
+        # print("[DEBUG] Using OnPolicyRunnerDreamWaQ")
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer

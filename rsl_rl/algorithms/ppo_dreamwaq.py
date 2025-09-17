@@ -25,7 +25,7 @@ class PPODreamWaQ:
                  schedule="fixed",
                  desired_kl=0.01,
                  device='cpu',
-                 kl_loss_coef=1e-4,
+                 beta_coef=1e-4,
                  ):
 
         self.device = device
@@ -53,7 +53,7 @@ class PPODreamWaQ:
         self.use_clipped_value_loss = use_clipped_value_loss
 
         # CENet parameters
-        self.kl_loss_coef = kl_loss_coef
+        self.beta_coef = beta_coef
 
         self.episode_reward_window = deque(maxlen=100)
 
@@ -163,7 +163,7 @@ class PPODreamWaQ:
                 velocity_loss = F.mse_loss(predicted_velocity_batch, velocity_targets_batch, reduction='mean')
                 recon_loss = F.mse_loss(reconstructed_next_obs_batch, next_obs_batch, reduction='mean')
                 kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
-                ce_loss = velocity_loss + recon_loss + kl_loss * self.kl_loss_coef
+                ce_loss = velocity_loss + recon_loss + kl_loss * self.beta_coef
 
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + ce_loss
 

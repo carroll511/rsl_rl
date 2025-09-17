@@ -26,17 +26,19 @@ class ActorCriticDreamWaQ(nn.Module):
 
         # CENet
         cenet_input_dim = num_actor_obs * history_len
+        output_dim = velocity_dims + latent_dims
+
         self.cenet_encoder = nn.Sequential(
             nn.Linear(cenet_input_dim, 128),
             activation,
             nn.Linear(128, 64),
             activation,
-            nn.Linear(64, 19)
+            nn.Linear(64, output_dim)
         )
 
-        self.velocity_head = nn.Linear(19, velocity_dims)
-        self.latent_mu_head = nn.Linear(19, latent_dims)
-        self.latent_logvar_head = nn.Linear(19, latent_dims)
+        self.velocity_head = nn.Linear(output_dim, velocity_dims)
+        self.latent_mu_head = nn.Linear(output_dim, latent_dims)
+        self.latent_logvar_head = nn.Linear(output_dim, latent_dims)
 
         self.velocity_decoder = nn.Sequential(
             nn.Linear(velocity_dims, 64),

@@ -105,6 +105,7 @@ class PPODreamWaQ:
         mean_velocity_loss = 0
         mean_recon_loss = 0
         mean_kl_loss = 0
+        mean_ce_loss = 0
 
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -113,7 +114,10 @@ class PPODreamWaQ:
         for obs_batch, critic_obs_batch, history_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, velocity_targets_batch, next_obs_batch in generator:
             
+                # predicted_velocity_batch, _, reconstructed_next_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
+
                 self.actor_critic.act(obs_batch, history_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
+
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 mu_batch = self.actor_critic.action_mean
@@ -172,6 +176,9 @@ class PPODreamWaQ:
                 mean_value_loss += value_loss.item()
                 mean_surrogate_loss += surrogate_loss.item()
                 mean_velocity_loss += velocity_loss.item()
+                mean_ce_loss += ce_loss.item()
+                mean_recon_loss += recon_loss.item()
+                mean_kl_loss += kl_loss.item()
                 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
@@ -179,7 +186,8 @@ class PPODreamWaQ:
         mean_velocity_loss /= num_updates
         mean_recon_loss /= num_updates
         mean_kl_loss /= num_updates
+        mean_ce_loss /= num_updates
 
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss
+        return mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss, mean_ce_loss

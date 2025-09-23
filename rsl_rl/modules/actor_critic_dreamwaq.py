@@ -115,9 +115,7 @@ class ActorCriticDreamWaQ(nn.Module):
         eps = torch.randn_like(latent_std)
         z = latent_mu + eps * latent_std
 
-        v_decoded = self.velocity_decoder(predicted_velocity)
-        z_decoded = self.latent_decoder(z)
-        reconstructed_next_obs = self.cenet_decoder(torch.cat([v_decoded, z_decoded], dim=-1))
+        reconstructed_next_obs = self.cenet_decoder(z)
 
         return predicted_velocity, z, reconstructed_next_obs, latent_mu, latent_logvar
 

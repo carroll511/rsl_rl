@@ -25,37 +25,28 @@ class ActorCriticDreamWaQ(nn.Module):
         activation = get_activation(activation)
 
         # CENet
-        cenet_input_dim = num_actor_obs * history_len
-        output_dim = velocity_dims + latent_dims
+        cenet_input_dim = num_actor_obs * (history_len + 1)
 
+        # Encoder
         self.cenet_encoder = nn.Sequential(
             nn.Linear(cenet_input_dim, 128),
             activation,
             nn.Linear(128, 64),
             activation,
-            nn.Linear(64, output_dim)
         )
 
-        self.velocity_head = nn.Linear(output_dim, velocity_dims)
-        self.latent_mu_head = nn.Linear(output_dim, latent_dims)
-        self.latent_logvar_head = nn.Linear(output_dim, latent_dims)
+        # Velocity head
+        self.velocity_head = nn.Linear(64, velocity_dims)
 
-        self.velocity_decoder = nn.Sequential(
-            nn.Linear(velocity_dims, 64),
-            activation,
-            nn.Linear(64, num_actor_obs)
-        )
+        # Latent head (mu, logvar)
+        self.latent_mu_head = nn.Linear(64, latent_dims)
+        self.latent_logvar_head = nn.Linear(64, latent_dims)
 
-        self.latent_decoder = nn.Sequential(
+        # Decoder
+        self.cenet_decoder = nn.Sequential(
             nn.Linear(latent_dims, 64),
             activation,
             nn.Linear(64, num_actor_obs)
-        )
-
-        self.cenet_decoder = nn.Sequential(
-            nn.Linear(num_actor_obs * 2, 128),
-            activation,
-            nn.Linear(128, num_actor_obs)
         )
 
         print(f"[DreamWaQ] CENet Encoder: {self.cenet_encoder}")
@@ -158,7 +149,6 @@ class ActorCriticDreamWaQ(nn.Module):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def act_inference(self, observations, history_observations):
-        # print("[DEBUG] act_inference DreamWaQ called", observations.shape, history_observations.shape)
         predicted_velocity, z, _, _, _ = self.forward(history_observations)
         actor_input = torch.cat([observations, predicted_velocity, z], dim=-1)
         actions_mean = self.actor(actor_input)

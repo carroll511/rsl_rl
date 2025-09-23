@@ -44,6 +44,9 @@ class OnPolicyRunnerDreamWaQ:
 
         # Log
         self.log_dir = log_dir
+        if self.log_dir is not None:
+            os.makedirs(self.log_dir, exist_ok=True)
+    
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
@@ -122,7 +125,9 @@ class OnPolicyRunnerDreamWaQ:
 
         wandb.finish()
 
-    def log(self, locs, rewbuffer, lenbuffer):
+    def log(self, locs):
+            rewbuffer = locs['rewbuffer']
+            lenbuffer = locs['lenbuffer']
             self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
             self.tot_time += locs['collection_time'] + locs['learn_time']
             fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))

@@ -106,7 +106,6 @@ class RolloutStorage:
         self.mu[self.step].copy_(transition.action_mean)
         self.sigma[self.step].copy_(transition.action_sigma)
         self.velocity_targets[self.step].copy_(transition.velocity_targets)
-        self.next_observations[self.step].copy_(transition.next_observations)
         self._save_hidden_states(transition.hidden_states)
         self.step += 1
 
@@ -194,9 +193,8 @@ class RolloutStorage:
                 old_mu_batch = old_mu[batch_idx]
                 old_sigma_batch = old_sigma[batch_idx]
                 velocity_targets_batch = velocity_targets[batch_idx]
-                next_obs_batch = next_observations[batch_idx]
                 yield obs_batch, critic_observations_batch, history_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
-                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, velocity_targets_batch, next_obs_batch
+                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, velocity_targets_batch
 
     # for RNNs only
     def reccurent_mini_batch_generator(self, num_mini_batches, num_epochs=8):

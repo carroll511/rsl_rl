@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 
 from rsl_rl.modules import ActorCritic, ActorCriticDreamWaQ
 from rsl_rl.storage import RolloutStorage
@@ -25,7 +24,7 @@ class PPODreamWaQ:
                  schedule="fixed",
                  desired_kl=0.01,
                  device='cpu',
-                 beta_coef=1e-4,
+                 beta_coef=1.0,
                  ):
 
         self.device = device
@@ -77,6 +76,7 @@ class PPODreamWaQ:
         self.transition.action_sigma = self.actor_critic.action_std.detach()
         # need to record obs and critic_obs before env.step()
         self.transition.observations = obs
+        self.transition.history_observations = history_obs
         self.transition.critic_observations = critic_obs
         return self.transition.actions
     
@@ -159,9 +159,9 @@ class PPODreamWaQ:
                 else:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
-                # CENet loss
-                velocity_loss = F.mse_loss(predicted_velocity_batch, velocity_targets_batch, reduction='mean')
-                recon_loss = F.mse_loss(reconstructed_next_obs_batch, next_obs_batch, reduction='mean')
+                # CENet loss                
+                velocity_loss = nn.MSELoss()(predicted_velocity_batch, velocity_targets_batch)
+                recon_loss = nn.MSELoss()(reconstructed_next_obs_batch, next_obs_batch)
                 kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
                 ce_loss = velocity_loss + recon_loss + kl_loss * self.beta_coef
 

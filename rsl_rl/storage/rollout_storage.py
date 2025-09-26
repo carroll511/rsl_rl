@@ -33,7 +33,7 @@ import os
 import torch
 import numpy as np
 
-from rsl_rl.utils import split_and_pad_trajectories, tensor_summary
+from rsl_rl.utils import split_and_pad_trajectories
 
 class RolloutStorage:
     class Transition:
@@ -58,7 +58,6 @@ class RolloutStorage:
     def __init__(self, num_envs, num_transitions_per_env, history_len, obs_shape, privileged_obs_shape, actions_shape, device='cpu', debug_enabled=False):
 
         self.device = device
-        self.debug_enabled = bool(debug_enabled) or bool(int(os.getenv("RSL_RL_DEBUG", "0")))
 
         self.obs_shape = obs_shape
         self.privileged_obs_shape = privileged_obs_shape
@@ -95,35 +94,10 @@ class RolloutStorage:
         self.next_observations = torch.zeros(num_transitions_per_env, num_envs, *obs_shape, device=self.device)
 
         self.step = 0
-        self._debug(
-            "RolloutStorage initialized",
-            num_envs=num_envs,
-            num_transitions_per_env=num_transitions_per_env,
-            history_len=history_len,
-            obs_shape=obs_shape,
-            privileged_obs_shape=privileged_obs_shape,
-            actions_shape=actions_shape,
-            device=device,
-        )
 
     def add_transitions(self, transition: Transition):
         if self.step >= self.num_transitions_per_env:
             raise AssertionError("Rollout buffer overflow")
-        self._debug(
-            "Adding transition",
-            step=self.step,
-            observations=transition.observations,
-            critic_observations=transition.critic_observations,
-            history_observations=transition.history_observations,
-            actions=transition.actions,
-            rewards=transition.rewards,
-            dones=transition.dones,
-            values=transition.values,
-            actions_log_prob=transition.actions_log_prob,
-            action_mean=transition.action_mean,
-            action_sigma=transition.action_sigma,
-            velocity_targets=transition.velocity_targets,
-        )
         self.observations[self.step].copy_(transition.observations)
         if self.privileged_observations is not None: self.privileged_observations[self.step].copy_(transition.critic_observations)
         self.history_observations[self.step].copy_(transition.history_observations)
@@ -137,12 +111,9 @@ class RolloutStorage:
         self.velocity_targets[self.step].copy_(transition.velocity_targets)
         self._save_hidden_states(transition.hidden_states)
         self.step += 1
-        self._debug("Transition stored", next_step=self.step)
 
     def _save_hidden_states(self, hidden_states):
-        self._debug("Saving hidden states", hidden_states=hidden_states, step=self.step)
         if hidden_states is None or hidden_states==(None, None):
-            self._debug("Hidden states empty, skipping store")
             return
         # make a tuple out of GRU hidden state sto match the LSTM format
         hid_a = hidden_states[0] if isinstance(hidden_states[0], tuple) else (hidden_states[0],)
@@ -152,29 +123,16 @@ class RolloutStorage:
         if self.saved_hidden_states_a is None:
             self.saved_hidden_states_a = [torch.zeros(self.observations.shape[0], *hid_a[i].shape, device=self.device) for i in range(len(hid_a))]
             self.saved_hidden_states_c = [torch.zeros(self.observations.shape[0], *hid_c[i].shape, device=self.device) for i in range(len(hid_c))]
-            self._debug("Initialized hidden state storage",
-                        saved_hidden_states_a=self.saved_hidden_states_a,
-                        saved_hidden_states_c=self.saved_hidden_states_c)
         # copy the states
         for i in range(len(hid_a)):
             self.saved_hidden_states_a[i][self.step].copy_(hid_a[i])
             self.saved_hidden_states_c[i][self.step].copy_(hid_c[i])
-        self._debug("Hidden states stored",
-                    step=self.step,
-                    saved_hidden_states_a=self.saved_hidden_states_a,
-                    saved_hidden_states_c=self.saved_hidden_states_c)
 
 
     def clear(self):
         self.step = 0
-        self._debug("Storage cleared")
 
     def compute_returns(self, last_values, gamma, lam):
-        self._debug("Compute returns start",
-                    last_values=last_values,
-                    gamma=gamma,
-                    lam=lam,
-                    total_steps=self.num_transitions_per_env)
         advantage = 0
         for step in reversed(range(self.num_transitions_per_env)):
             if step == self.num_transitions_per_env - 1:
@@ -185,17 +143,10 @@ class RolloutStorage:
             delta = self.rewards[step] + next_is_not_terminal * gamma * next_values - self.values[step]
             advantage = delta + next_is_not_terminal * gamma * lam * advantage
             self.returns[step] = advantage + self.values[step]
-            self._debug("Return computed",
-                        step=step,
-                        next_values=next_values,
-                        delta=delta,
-                        advantage=advantage,
-                        return_value=self.returns[step])
 
         # Compute and normalize the advantages
         self.advantages = self.returns - self.values
         self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)
-        self._debug("Advantages normalized", advantages=self.advantages)
 
     def get_statistics(self):
         done = self.dones
@@ -205,9 +156,6 @@ class RolloutStorage:
         trajectory_lengths = (done_indices[1:] - done_indices[:-1])
         mean_length = trajectory_lengths.float().mean()
         mean_reward = self.rewards.mean()
-        self._debug("Statistics computed",
-                    mean_trajectory_length=mean_length,
-                    mean_reward=mean_reward)
         return mean_length, mean_reward
 
     def mini_batch_generator(self, num_mini_batches, num_epochs=8):
@@ -230,12 +178,8 @@ class RolloutStorage:
         old_mu = self.mu.flatten(0, 1)
         old_sigma = self.sigma.flatten(0, 1)
         velocity_targets = self.velocity_targets.flatten(0, 1)
+        next_observations = self.next_observations.flatten(0, 1)
 
-        self._debug("Mini batch generator setup",
-                    batch_size=batch_size,
-                    mini_batch_size=mini_batch_size,
-                    num_epochs=num_epochs,
-                    num_mini_batches=num_mini_batches)
 
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
@@ -243,12 +187,7 @@ class RolloutStorage:
                 start = i*mini_batch_size
                 end = (i+1)*mini_batch_size
                 batch_idx = indices[start:end]
-                self._debug("Mini batch indices",
-                            epoch=epoch,
-                            batch_index=i,
-                            start=start,
-                            end=end,
-                            batch_idx=batch_idx)
+
 
                 obs_batch = observations[batch_idx]
                 critic_observations_batch = critic_observations[batch_idx]
@@ -261,20 +200,10 @@ class RolloutStorage:
                 old_mu_batch = old_mu[batch_idx]
                 old_sigma_batch = old_sigma[batch_idx]
                 velocity_targets_batch = velocity_targets[batch_idx]
-                self._debug(
-                    "Yielding mini batch",
-                    epoch=epoch,
-                    batch_index=i,
-                    obs_batch=obs_batch,
-                    critic_observations_batch=critic_observations_batch,
-                    history_observations_batch=history_observations_batch,
-                    actions_batch=actions_batch,
-                    returns_batch=returns_batch,
-                    advantages_batch=advantages_batch,
-                    velocity_targets_batch=velocity_targets_batch,
-                )
+                next_obs_batch = next_observations[batch_idx]
+
                 yield obs_batch, critic_observations_batch, history_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
-                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, velocity_targets_batch
+                       old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None, velocity_targets_batch, next_obs_batch
 
     # for RNNs only
     def reccurent_mini_batch_generator(self, num_mini_batches, num_epochs=8):
@@ -284,10 +213,6 @@ class RolloutStorage:
             padded_critic_obs_trajectories, _ = split_and_pad_trajectories(self.privileged_observations, self.dones)
         else: 
             padded_critic_obs_trajectories = padded_obs_trajectories
-
-        self._debug("Recurrent mini batch setup",
-                    num_mini_batches=num_mini_batches,
-                    num_epochs=num_epochs)
 
         mini_batch_size = self.num_envs // num_mini_batches
         for ep in range(num_epochs):
@@ -327,27 +252,7 @@ class RolloutStorage:
                 hid_a_batch = hid_a_batch[0] if len(hid_a_batch)==1 else hid_a_batch
                 hid_c_batch = hid_c_batch[0] if len(hid_c_batch)==1 else hid_a_batch
 
-                self._debug(
-                    "Yielding recurrent mini batch",
-                    epoch=ep,
-                    batch_index=i,
-                    obs_batch=obs_batch,
-                    critic_obs_batch=critic_obs_batch,
-                    actions_batch=actions_batch,
-                    returns_batch=returns_batch,
-                    advantages_batch=advantages_batch,
-                    masks_batch=masks_batch,
-                )
-
                 yield obs_batch, critic_obs_batch, actions_batch, values_batch, advantages_batch, returns_batch, \
                        old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (hid_a_batch, hid_c_batch), masks_batch
                 
                 first_traj = last_traj
-
-    def _debug(self, message, **values):
-        if not self.debug_enabled:
-            return
-        details = [f"[DreamWaQ:RolloutStorage] {message}"]
-        for name, value in values.items():
-            details.append(tensor_summary(name, value))
-        print(" | ".join(details))

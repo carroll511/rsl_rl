@@ -87,6 +87,7 @@ class OnPolicyRunnerDreamWaQ:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
+                    # print(velocity_targets)
                     actions = self.alg.act(obs, critic_obs, history_obs, velocity_targets)
                     obs, privileged_obs, history_obs, velocity_targets, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs

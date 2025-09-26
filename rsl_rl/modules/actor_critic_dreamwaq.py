@@ -1,9 +1,12 @@
+import os
 import numpy as np
 
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
+
+from rsl_rl.utils import tensor_summary
 
 class ActorCriticDreamWaQ(nn.Module):
     is_recurrent = False
@@ -17,10 +20,13 @@ class ActorCriticDreamWaQ(nn.Module):
                         critic_hidden_dims=[512, 256, 128],
                         activation='elu',
                         init_noise_std=1.0,
+                        debug=True,
                         **kwargs):
         if kwargs:
             print("ActorCriticDreamWaQ.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
         super(ActorCriticDreamWaQ, self).__init__()
+
+        self.debug_enabled = debug or bool(int(os.getenv("RSL_RL_DEBUG", "0")))
 
         activation = get_activation(activation)
 
@@ -36,7 +42,8 @@ class ActorCriticDreamWaQ(nn.Module):
         )
 
         # Velocity head
-        self.velocity_head = nn.Linear(64, velocity_dims)
+        self.velocity_mu_head = nn.Linear(64, velocity_dims)
+        self.velocity_logvar_head = nn.Linear(64, velocity_dims)
 
         # Latent head (mu, logvar)
         self.latent_mu_head = nn.Linear(64, latent_dims)
@@ -44,13 +51,21 @@ class ActorCriticDreamWaQ(nn.Module):
 
         # Decoder
         self.cenet_decoder = nn.Sequential(
-            nn.Linear(latent_dims, 64),
+            nn.Linear(latent_dims + velocity_dims, 64),
             activation,
-            nn.Linear(64, num_actor_obs)
+            nn.Linear(64, 128),
+            activation,
+            nn.Linear(128, num_actor_obs)
         )
 
-        print(f"[DreamWaQ] CENet Encoder: {self.cenet_encoder}")
-        print(f"[DreamWaQ] CENet Decoder: {self.cenet_decoder}")
+        self._debug(
+            "Initialized CENet",
+            cenet_encoder=self.cenet_encoder,
+            cenet_decoder=self.cenet_decoder,
+            history_len=history_len,
+            velocity_dims=velocity_dims,
+            latent_dims=latent_dims,
+        )
 
         mlp_input_dim_a = num_actor_obs + velocity_dims + latent_dims
         mlp_input_dim_c = num_critic_obs
@@ -79,8 +94,7 @@ class ActorCriticDreamWaQ(nn.Module):
                 critic_layers.append(activation)
         self.critic = nn.Sequential(*critic_layers)
 
-        print(f"[DreamWaQ] Actor MLP: {self.actor}")
-        print(f"[DreamWaQ] Critic MLP: {self.critic}")
+        self._debug("Initialized Actor/Critic", actor_mlp=self.actor, critic_mlp=self.critic)
 
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
@@ -100,24 +114,40 @@ class ActorCriticDreamWaQ(nn.Module):
 
 
     def reset(self, dones=None):
-        pass
+        self._debug("Reset called", dones=dones)
 
     def forward(self, history_observations):
         batch_size = history_observations.shape[0]
         history_observations_flat = history_observations.view(batch_size, -1)
         encoded = self.cenet_encoder(history_observations_flat)
 
-        predicted_velocity = self.velocity_head(encoded)
+        velocity_mu = self.velocity_mu_head(encoded)
+        velocity_logvar = self.velocity_logvar_head(encoded)
         latent_mu = self.latent_mu_head(encoded)
-        latent_logvar = torch.clamp(self.latent_logvar_head(encoded), -10, 10)
+        latent_logvar = self.latent_logvar_head(encoded)
+
+        velocity_std = torch.exp(0.5 * velocity_logvar)
+        eps_v = torch.randn_like(velocity_std)
+        v = velocity_mu + eps_v * velocity_std
 
         latent_std = torch.exp(0.5 * latent_logvar)
-        eps = torch.randn_like(latent_std)
-        z = latent_mu + eps * latent_std
+        eps_z = torch.randn_like(latent_std)
+        z = latent_mu + eps_z * latent_std
 
-        reconstructed_next_obs = self.cenet_decoder(z)
+        reconstructed_obs = self.cenet_decoder(torch.cat([v, z], dim=-1))
 
-        return predicted_velocity, z, reconstructed_next_obs, latent_mu, latent_logvar
+        self._debug(
+            "Forward pass",
+            history=history_observations,
+            encoded=encoded,
+            velocity_mu=velocity_mu,
+            velocity_std=velocity_std,
+            latent_mu=latent_mu,
+            latent_std=latent_std,
+            reconstructed_obs=reconstructed_obs,
+        )
+
+        return v, z, reconstructed_obs, latent_mu, latent_logvar
 
     @property
     def action_mean(self):
@@ -134,14 +164,24 @@ class ActorCriticDreamWaQ(nn.Module):
     def update_distribution(self, actor_input):
         mean = self.actor(actor_input)
         self.distribution = Normal(mean, mean*0. + self.std)
+        self._debug("Updated distribution",
+                    actor_input=actor_input,
+                    mean=mean,
+                    std=self.std)
 
     def act(self, observations, history_observations, **kwargs):
 
-        predicted_velocity, z, _, _, _ = self.forward(history_observations)
-        actor_input = torch.cat([observations, predicted_velocity, z], dim=-1)
+        v, z, _, _, _ = self.forward(history_observations)
+        actor_input = torch.cat([observations, v, z], dim=-1)
 
         self.update_distribution(actor_input)
-        return self.distribution.sample()
+        action_sample = self.distribution.sample()
+        self._debug("Act",
+                    observations=observations,
+                    history=history_observations,
+                    actor_input=actor_input,
+                    action_sample=action_sample)
+        return action_sample
     
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
@@ -150,11 +190,26 @@ class ActorCriticDreamWaQ(nn.Module):
         predicted_velocity, z, _, _, _ = self.forward(history_observations)
         actor_input = torch.cat([observations, predicted_velocity, z], dim=-1)
         actions_mean = self.actor(actor_input)
+        self._debug("Act inference",
+                    observations=observations,
+                    predicted_velocity=predicted_velocity,
+                    latent=z,
+                    actor_input=actor_input,
+                    actions_mean=actions_mean)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
+        self._debug("Evaluate", critic_observations=critic_observations, value=value)
         return value
+
+    def _debug(self, message, **values):
+        if not self.debug_enabled:
+            return
+        details = [f"[DreamWaQ:ActorCritic] {message}"]
+        for name, value in values.items():
+            details.append(tensor_summary(name, value))
+        print(" | ".join(details))
 
 def get_activation(act_name):
     if act_name == "elu":

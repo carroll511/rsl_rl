@@ -7,7 +7,6 @@ import torch
 from rsl_rl.algorithms import PPO, PPODreamWaQ
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, ActorCriticDreamWaQ
 from rsl_rl.env import VecEnv
-from rsl_rl.utils import tensor_summary
 
 import wandb
 
@@ -25,48 +24,23 @@ class OnPolicyRunnerDreamWaQ:
         self.policy_cfg = train_cfg["policy"]
         self.device = device
         self.env = env
-
-        runner_debug_cfg = self.cfg.get("debug")
-        global_debug_cfg = train_cfg.get("debug")
-        env_debug_flag = bool(int(os.getenv("RSL_RL_DEBUG", "0")))
-        if runner_debug_cfg is not None:
-            resolved_debug = bool(runner_debug_cfg)
-        elif global_debug_cfg is not None:
-            resolved_debug = bool(global_debug_cfg)
-        else:
-            resolved_debug = True
-        self.debug_enabled = env_debug_flag or resolved_debug
-
         if self.env.num_privileged_obs is not None:
             num_critic_obs = self.env.num_privileged_obs 
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
-        policy_kwargs = dict(self.policy_cfg)
-        policy_kwargs.setdefault("debug", self.debug_enabled)
-        actor_critic: ActorCriticDreamWaQ = actor_critic_class(
-            self.env.num_obs,
-            num_critic_obs,
-            self.env.num_actions,
-            self.env.history_len,
-            **policy_kwargs
-        ).to(self.device)
+        actor_critic: ActorCriticDreamWaQ = actor_critic_class( self.env.num_obs,
+                                                        num_critic_obs,
+                                                        self.env.num_actions,
+                                                        self.env.history_len,
+                                                        **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        alg_kwargs = dict(self.alg_cfg)
-        alg_kwargs.setdefault("debug_enabled", self.debug_enabled)
-        self.alg: PPODreamWaQ = alg_class(actor_critic, device=self.device, **alg_kwargs)
+        self.alg: PPODreamWaQ = alg_class(actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
 
         # init storage and model
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, self.env.history_len, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions])
-        self._debug("Storage initialized",
-                    num_envs=self.env.num_envs,
-                    num_steps_per_env=self.num_steps_per_env,
-                    history_len=self.env.history_len,
-                    actor_obs_shape=self.env.num_obs,
-                    privileged_obs_shape=self.env.num_privileged_obs,
-                    action_dim=self.env.num_actions)
 
         # Log
         self.log_dir = log_dir
@@ -84,49 +58,22 @@ class OnPolicyRunnerDreamWaQ:
             name=self.cfg.get("exp_name", "a1_dreamwaq_cenet_test"),
             config=train_cfg
         )
-        self._debug("wandb initialized",
-                    project="leggedgym_project",
-                    run_name=self.cfg.get("exp_name", "a1_dreamwaq_cenet_test"))
 
-        reset_result = self.env.reset()
-        self._debug("Environment reset", reset_output=reset_result)
-
-        self._debug("Runner initialized",
-                    device=self.device,
-                    log_dir=self.log_dir,
-                    debug_enabled=self.debug_enabled,
-                    runner_cfg=self.cfg,
-                    alg_cfg=self.alg_cfg,
-                    policy_cfg=self.policy_cfg)
+        _, _, _, _ = self.env.reset()
 
         # print("[DEBUG] Using OnPolicyRunnerDreamWaQ")
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
-        self._debug("Learn invoked",
-                    num_learning_iterations=num_learning_iterations,
-                    init_at_random_ep_len=init_at_random_ep_len,
-                    current_iteration=self.current_learning_iteration)
-
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
-            self._debug("Initialized random episode lengths",
-                        episode_length_buf=self.env.episode_length_buf,
-                        max_episode_length=self.env.max_episode_length)
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
         history_obs = self.env.get_history_observations()
         velocity_targets = self.env.get_velocity_targets()
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs, history_obs, velocity_targets = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), velocity_targets.to(self.device)
-
-        self._debug("Initial buffers prepared",
-                    obs=obs,
-                    critic_obs=critic_obs,
-                    history_obs=history_obs,
-                    velocity_targets=velocity_targets)
         
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
-        self._debug("Actor-critic set to train mode")
 
         ep_infos = []
         rewbuffer = deque(maxlen=100)
@@ -136,57 +83,15 @@ class OnPolicyRunnerDreamWaQ:
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
-            self._debug("Iteration start",
-                        iteration=it,
-                        total_iterations=tot_iter,
-                        obs=obs,
-                        critic_obs=critic_obs,
-                        history_obs=history_obs,
-                        velocity_targets=velocity_targets)
             start = time.time()
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    self._debug("Rollout step",
-                                iteration=it,
-                                step=i,
-                                obs=obs,
-                                critic_obs=critic_obs,
-                                history_obs=history_obs,
-                                velocity_targets=velocity_targets)
                     actions = self.alg.act(obs, critic_obs, history_obs, velocity_targets)
-                    self._debug("Actions sampled",
-                                iteration=it,
-                                step=i,
-                                actions=actions,
-                                action_mean=self.alg.actor_critic.action_mean,
-                                action_std=self.alg.actor_critic.action_std)
                     obs, privileged_obs, history_obs, velocity_targets, rewards, dones, infos = self.env.step(actions)
-                    self._debug("Env step completed",
-                                iteration=it,
-                                step=i,
-                                rewards=rewards,
-                                dones=dones,
-                                infos_keys=list(infos.keys()))
-                    # update validated
-                    # print("history_obs_batch[0, 0, :10]:", history_obs[0, 0, :10])  # 첫 샘플의 가장 최근 history 앞 10개
-                    # print("history_obs_batch[0, -1, :10]:", history_obs[0, -1, :10])  # 같은 샘플의 가장 오래된 history 앞 10개
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, history_obs, velocity_targets, rewards, dones = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), velocity_targets.to(self.device), rewards.to(self.device), dones.to(self.device)
-                    self._debug("Tensors moved to device",
-                                iteration=it,
-                                step=i,
-                                obs=obs,
-                                critic_obs=critic_obs,
-                                history_obs=history_obs,
-                                velocity_targets=velocity_targets,
-                                rewards=rewards,
-                                dones=dones)
-                    self.alg.process_env_step(rewards, dones, infos)
-                    self._debug("Processed env step",
-                                iteration=it,
-                                step=i,
-                                storage_step=getattr(self.alg.storage, "step", None))
+                    self.alg.process_env_step(rewards, dones, infos, next_observations=obs)
                     
                     if self.log_dir is not None:
                         # Book keeping
@@ -202,30 +107,14 @@ class OnPolicyRunnerDreamWaQ:
 
                 stop = time.time()
                 collection_time = stop - start
-                self._debug("Rollout complete",
-                            iteration=it,
-                            collection_time=collection_time,
-                            storage_filled_steps=self.alg.storage.step)
 
                 # Learning step
                 start = stop
                 self.alg.compute_returns(critic_obs)
-                self._debug("Computed returns",
-                            iteration=it,
-                            critic_obs=critic_obs)
 
             mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss, mean_ce_loss = self.alg.update()
             stop = time.time()
             learn_time = stop - start
-            self._debug("Update complete",
-                        iteration=it,
-                        learn_time=learn_time,
-                        mean_value_loss=mean_value_loss,
-                        mean_surrogate_loss=mean_surrogate_loss,
-                        mean_velocity_loss=mean_velocity_loss,
-                        mean_recon_loss=mean_recon_loss,
-                        mean_kl_loss=mean_kl_loss,
-                        mean_ce_loss=mean_ce_loss)
             if self.log_dir is not None:
                 self.log(locals())
             if it % self.save_interval == 0:
@@ -234,12 +123,8 @@ class OnPolicyRunnerDreamWaQ:
         
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
-        self._debug("Learning session complete",
-                    total_iterations=num_learning_iterations,
-                    current_learning_iteration=self.current_learning_iteration)
 
         wandb.finish()
-        self._debug("wandb run finished")
 
     def log(self, locs):
             rewbuffer = locs['rewbuffer']
@@ -268,12 +153,6 @@ class OnPolicyRunnerDreamWaQ:
             if len(rewbuffer) > 0:
                 log_dict["Train/mean_reward"] = statistics.mean(rewbuffer)
                 log_dict["Train/mean_episode_length"] = statistics.mean(lenbuffer)
-
-            self._debug("Logging metrics",
-                        iteration=locs['it'],
-                        log_dict=log_dict,
-                        total_timesteps=self.tot_timesteps,
-                        total_time=self.tot_time)
 
             wandb.log(log_dict)
 
@@ -373,7 +252,6 @@ class OnPolicyRunnerDreamWaQ:
     #     print(log_string)
 
     def save(self, path, infos=None):
-        self._debug("Saving checkpoint", path=path, infos=infos, iteration=self.current_learning_iteration)
         torch.save({
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
@@ -382,30 +260,15 @@ class OnPolicyRunnerDreamWaQ:
             }, path)
 
     def load(self, path, load_optimizer=True):
-        self._debug("Loading checkpoint", path=path, load_optimizer=load_optimizer)
         loaded_dict = torch.load(path)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
-        self._debug("Checkpoint loaded",
-                    path=path,
-                    iteration=self.current_learning_iteration,
-                    contains_infos=loaded_dict.get('infos') is not None)
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):
-        self._debug("Fetching inference policy", target_device=device)
         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
         if device is not None:
             self.alg.actor_critic.to(device)
-            self._debug("Moved actor critic for inference", device=device)
         return self.alg.actor_critic.act_inference
-
-    def _debug(self, message, **values):
-        if not self.debug_enabled:
-            return
-        details = [f"[DreamWaQ:Runner] {message}"]
-        for name, value in values.items():
-            details.append(tensor_summary(name, value))
-        print(" | ".join(details))

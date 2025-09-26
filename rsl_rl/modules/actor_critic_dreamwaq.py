@@ -45,7 +45,7 @@ class ActorCriticDreamWaQ(nn.Module):
 
         # Decoder
         self.cenet_decoder = nn.Sequential(
-            nn.Linear(latent_dims, 64),
+            nn.Linear(latent_dims + velocity_dims, 64),
             activation,
             nn.Linear(64, 128),
             activation,
@@ -124,7 +124,9 @@ class ActorCriticDreamWaQ(nn.Module):
         eps_z = torch.randn_like(latent_std)
         z = latent_mu + eps_z * latent_std
 
-        reconstructed_next_obs = self.cenet_decoder(z)
+        decoder_input = torch.cat((v, z), dim=-1)
+
+        reconstructed_next_obs = self.cenet_decoder(decoder_input)
 
         return v, z, reconstructed_next_obs, latent_mu, latent_logvar
 

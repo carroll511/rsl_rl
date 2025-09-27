@@ -24,6 +24,7 @@ class OnPolicyRunnerDreamWaQ:
         self.policy_cfg = train_cfg["policy"]
         self.device = device
         self.env = env
+        # print(self.env.num_privileged_obs)
         if self.env.num_privileged_obs is not None:
             num_critic_obs = self.env.num_privileged_obs 
         else:
@@ -59,7 +60,7 @@ class OnPolicyRunnerDreamWaQ:
             config=train_cfg
         )
 
-        _, _, _, _ = self.env.reset()
+        _, _, _ = self.env.reset()
 
         # print("[DEBUG] Using OnPolicyRunnerDreamWaQ")
     
@@ -69,9 +70,9 @@ class OnPolicyRunnerDreamWaQ:
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
         history_obs = self.env.get_history_observations()
-        velocity_targets = self.env.get_velocity_targets()
+        # velocity_targets = self.env.get_velocity_targets()
         critic_obs = privileged_obs if privileged_obs is not None else obs
-        obs, critic_obs, history_obs, velocity_targets = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), velocity_targets.to(self.device)
+        obs, critic_obs, history_obs = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device)
         
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
@@ -88,10 +89,10 @@ class OnPolicyRunnerDreamWaQ:
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     # print(velocity_targets)
-                    actions = self.alg.act(obs, critic_obs, history_obs, velocity_targets)
-                    obs, privileged_obs, history_obs, velocity_targets, rewards, dones, infos = self.env.step(actions)
+                    actions = self.alg.act(obs, critic_obs, history_obs)
+                    obs, privileged_obs, history_obs, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, history_obs, velocity_targets, rewards, dones = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), velocity_targets.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    obs, critic_obs, history_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                     self.alg.process_env_step(rewards, dones, infos, next_observations=obs)
                     
                     if self.log_dir is not None:

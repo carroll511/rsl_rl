@@ -65,7 +65,8 @@ class PPODreamWaQ:
     def train_mode(self):
         self.actor_critic.train()
 
-    def act(self, obs, critic_obs, history_obs, velocity_targets):
+    # def act(self, obs, critic_obs, history_obs, velocity_targets):
+    def act(self, obs, critic_obs, history_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
@@ -78,13 +79,13 @@ class PPODreamWaQ:
         self.transition.observations = obs
         self.transition.history_observations = history_obs
         self.transition.critic_observations = critic_obs
-        self.transition.velocity_targets = velocity_targets
+        # self.transition.velocity_targets = velocity_targets
         return self.transition.actions
     
     def process_env_step(self, rewards, dones, infos, next_observations):
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
-        self.transition.next_observations = next_observations
+        # self.transition.next_observations = next_observations
         # Bootstrapping on time outs
         if 'time_outs' in infos:
             self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
@@ -112,7 +113,7 @@ class PPODreamWaQ:
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, history_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, velocity_targets_batch, next_obs_batch in generator:
+            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
             
                 # predicted_velocity_batch, _, reconstructed_next_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
 
@@ -160,8 +161,8 @@ class PPODreamWaQ:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 # CENet loss                
-                velocity_loss = nn.MSELoss()(predicted_velocity_batch, velocity_targets_batch)
-                recon_loss = nn.MSELoss()(reconstructed_obs_batch, next_obs_batch)
+                velocity_loss = nn.MSELoss()(predicted_velocity_batch, critic_obs_batch[:, : 3])
+                recon_loss = nn.MSELoss()(reconstructed_obs_batch, critic_obs_batch[:, 3 : 48])
                 kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
                 ce_loss = velocity_loss + recon_loss + kl_loss * self.beta_coef
 

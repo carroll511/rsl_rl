@@ -65,7 +65,7 @@ class PPODreamWaQ:
     def train_mode(self):
         self.actor_critic.train()
 
-    def act(self, obs, critic_obs, history_obs):
+    def act(self, obs, critic_obs, history_obs, velocity_targets):
     # def act(self, obs, critic_obs, history_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
@@ -79,6 +79,7 @@ class PPODreamWaQ:
         self.transition.observations = obs
         self.transition.history_observations = history_obs
         self.transition.critic_observations = critic_obs
+        self.transition.velocity_targets = velocity_targets
         return self.transition.actions
     
     def process_env_step(self, rewards, dones, infos):
@@ -112,7 +113,7 @@ class PPODreamWaQ:
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, history_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
+            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, velocity_targets_batch, in generator:
             
                 # predicted_velocity_batch, _, reconstructed_next_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
 
@@ -160,7 +161,7 @@ class PPODreamWaQ:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 # CENet loss                
-                velocity_loss = nn.MSELoss()(predicted_velocity_batch, critic_obs_batch[:, 45:48])
+                velocity_loss = nn.MSELoss()(predicted_velocity_batch, velocity_targets_batch)
                 recon_loss = nn.MSELoss()(reconstructed_obs_batch, critic_obs_batch[:, :45])
                 kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
                 ce_loss = velocity_loss + 0.1*(recon_loss + kl_loss * self.beta_coef)

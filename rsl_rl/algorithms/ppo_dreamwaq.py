@@ -161,10 +161,10 @@ class PPODreamWaQ:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
                 # CENet loss                
-                velocity_loss = nn.MSELoss()(predicted_velocity_batch, critic_obs_batch[:, : 3])
-                recon_loss = nn.MSELoss()(reconstructed_obs_batch, critic_obs_batch[:, 3 : 48])
+                velocity_loss = nn.MSELoss()(predicted_velocity_batch, critic_obs_batch[:, 45:48])
+                recon_loss = nn.MSELoss()(reconstructed_obs_batch, critic_obs_batch[:, :45])
                 kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
-                ce_loss = velocity_loss + recon_loss + kl_loss * self.beta_coef
+                ce_loss = velocity_loss + 0.1*(recon_loss + kl_loss * self.beta_coef)
 
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + ce_loss
 

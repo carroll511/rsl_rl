@@ -65,8 +65,8 @@ class PPODreamWaQ:
     def train_mode(self):
         self.actor_critic.train()
 
+    # def act(self, obs, critic_obs, history_obs, velocity_targets):
     def act(self, obs, critic_obs, history_obs):
-    # def act(self, obs, critic_obs, history_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
@@ -79,6 +79,7 @@ class PPODreamWaQ:
         self.transition.observations = obs
         self.transition.history_observations = history_obs
         self.transition.critic_observations = critic_obs
+        # self.transition.velocity_targets = velocity_targets
         return self.transition.actions
     
     def process_env_step(self, rewards, dones, infos):

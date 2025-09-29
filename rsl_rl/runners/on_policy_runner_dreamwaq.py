@@ -56,7 +56,7 @@ class OnPolicyRunnerDreamWaQ:
         # wandb init
         wandb.init(
             project="leggedgym_project",
-            name=self.cfg.get("exp_name", "a1_dreamwaq_cenet_test"),
+            name=self.cfg.get("exp_name", "a1_dreamwaq_env_4096"),
             config=train_cfg
         )
 
@@ -70,7 +70,6 @@ class OnPolicyRunnerDreamWaQ:
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
         history_obs = self.env.get_history_observations()
-        # velocity_targets = self.env.get_velocity_targets()
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs, history_obs = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device)
         
@@ -88,13 +87,12 @@ class OnPolicyRunnerDreamWaQ:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    # print(velocity_targets)
                     actions = self.alg.act(obs, critic_obs, history_obs)
                     obs, privileged_obs, history_obs, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, history_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
-                    self.alg.process_env_step(rewards, dones, infos, next_observations=obs)
-                    
+                    self.alg.process_env_step(rewards, dones, infos)
+
                     if self.log_dir is not None:
                         # Book keeping
                         if 'episode' in infos:

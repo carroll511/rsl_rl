@@ -27,25 +27,49 @@ class ActorCriticDreamWaQ(nn.Module):
         # CENet
         cenet_input_dim = num_actor_obs * (history_len + 1)
 
+        # # Encoder
+        # self.cenet_encoder = nn.Sequential(
+        #     nn.Linear(cenet_input_dim, 128),
+        #     activation,
+        #     nn.Linear(128, 64),
+        #     activation,
+        # )
+
+        # # Velocity head
+        # self.velocity_head = nn.Linear(64, velocity_dims)
+
+        # # Latent head (mu, logvar)
+        # self.latent_mu_head = nn.Linear(64, latent_dims)
+        # self.latent_logvar_head = nn.Linear(64, latent_dims)
+
+        # # Decoder
+        # self.cenet_decoder = nn.Sequential(
+        #     nn.Linear(latent_dims + velocity_dims, 64),
+        #     activation,
+        #     nn.Linear(64, 128),
+        #     activation,
+        #     nn.Linear(128, num_actor_obs),
+        # )
+
         # Encoder
         self.cenet_encoder = nn.Sequential(
             nn.Linear(cenet_input_dim, 128),
             activation,
             nn.Linear(128, 64),
             activation,
+            nn.Linear(64, velocity_dims + latent_dims * 2),
         )
 
-        # Velocity head
-        self.velocity_mu_head = nn.Linear(64, velocity_dims)
-        self.velocity_logvar_head = nn.Linear(64, velocity_dims)
+        # # Velocity head
+        # self.velocity_head = nn.Linear(64, velocity_dims)
 
-        # Latent head (mu, logvar)
-        self.latent_mu_head = nn.Linear(64, latent_dims)
-        self.latent_logvar_head = nn.Linear(64, latent_dims)
+        # # Latent head (mu, logvar)
+        # self.latent_mu_head = nn.Linear(64, latent_dims)
+        # self.latent_logvar_head = nn.Linear(64, latent_dims)
 
         # Decoder
         self.cenet_decoder = nn.Sequential(
-            nn.Linear(latent_dims + velocity_dims, 64),
+            nn.Linear(latent_dims, 64),
             activation,
             nn.Linear(64, 128),
             activation,
@@ -110,23 +134,24 @@ class ActorCriticDreamWaQ(nn.Module):
         history_observations_flat = history_observations.view(batch_size, -1)
         encoded = self.cenet_encoder(history_observations_flat)
 
-        velocity_mu = self.velocity_mu_head(encoded)
-        velocity_logvar = self.velocity_logvar_head(encoded)
+        v = encoded[:, :3]
+        latent_mu = encoded[:, 3:19]
+        latent_logvar = encoded[:, 19:]
 
-        velocity_std = torch.exp(0.5 * velocity_logvar)
-        eps_v = torch.randn_like(velocity_std)
-        v = velocity_mu + eps_v * velocity_std
+        # v = self.velocity_head(encoded)
 
-        latent_mu = self.latent_mu_head(encoded)
-        latent_logvar = self.latent_logvar_head(encoded)
+        # latent_mu = self.latent_mu_head(encoded)
+        # latent_logvar = self.latent_logvar_head(encoded)
 
         latent_std = torch.exp(0.5 * latent_logvar)
         eps_z = torch.randn_like(latent_std)
         z = latent_mu + eps_z * latent_std
 
-        decoder_input = torch.cat((v, z), dim=-1)
+        # decoder_input = torch.cat((v, z), dim=-1)
+        # print(decoder_input.shape)
 
-        reconstructed_next_obs = self.cenet_decoder(decoder_input)
+        # reconstructed_next_obs = self.cenet_decoder(decoder_input)
+        reconstructed_next_obs = self.cenet_decoder(z)
 
         return v, z, reconstructed_next_obs, latent_mu, latent_logvar
 

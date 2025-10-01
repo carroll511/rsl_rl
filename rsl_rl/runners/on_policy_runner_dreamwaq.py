@@ -56,7 +56,7 @@ class OnPolicyRunnerDreamWaQ:
         # wandb init
         wandb.init(
             project="leggedgym_project",
-            name=self.cfg.get("exp_name", "a1_dreamwaq_vel_targets_domain_random"),
+            name=self.cfg.get("exp_name", "a1_dreamwaq_vel_targets_noise_vec"),
             config=train_cfg
         )
 

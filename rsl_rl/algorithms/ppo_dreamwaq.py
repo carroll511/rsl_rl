@@ -70,7 +70,9 @@ class PPODreamWaQ:
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
-        self.transition.actions = self.actor_critic.act(obs, history_obs).detach()
+        act_distribution, _, _, _, _ = self.actor_critic.act(obs, history_obs)
+        self.transition.actions = act_distribution.detach()
+        # self.transition.actions = self.actor_critic.act(obs, history_obs).detach()
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
@@ -118,7 +120,7 @@ class PPODreamWaQ:
             
                 # predicted_velocity_batch, _, reconstructed_next_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
 
-                self.actor_critic.act(obs_batch, history_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
+                _, predicted_velocity_batch, reconstructed_obs_batch, latent_mu, logvar = self.actor_critic.act(obs_batch, history_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
 
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
@@ -126,7 +128,7 @@ class PPODreamWaQ:
                 sigma_batch = self.actor_critic.action_std
                 entropy_batch = self.actor_critic.entropy
 
-                predicted_velocity_batch, _, reconstructed_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
+                # predicted_velocity_batch, _, reconstructed_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
 
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':

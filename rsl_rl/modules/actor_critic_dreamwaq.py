@@ -173,11 +173,11 @@ class ActorCriticDreamWaQ(nn.Module):
 
     def act(self, observations, history_observations, **kwargs):
 
-        v, z, _, _, _ = self.forward(history_observations)
+        v, z, reconstructed_next_obs, latent_mu, latent_logvar = self.forward(history_observations)
         actor_input = torch.cat([observations, v, z], dim=-1)
 
         self.update_distribution(actor_input)
-        return self.distribution.sample()
+        return self.distribution.sample(), v, reconstructed_next_obs, latent_mu, latent_logvar
     
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)

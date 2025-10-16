@@ -84,10 +84,9 @@ class PPODreamWaQ:
         self.transition.velocity_targets = velocity_targets
         return self.transition.actions
     
-    def process_env_step(self, rewards, dones, infos, velocity_targets):
+    def process_env_step(self, rewards, dones, infos):
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
-        self.transition.velocity_targets = velocity_targets
         # self.transition.next_observations = next_observations
         # Bootstrapping on time outs
         if 'time_outs' in infos:

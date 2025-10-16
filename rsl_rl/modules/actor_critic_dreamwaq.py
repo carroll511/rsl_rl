@@ -172,9 +172,9 @@ class ActorCriticDreamWaQ(nn.Module):
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, history_observations, **kwargs):
-
         v, z, reconstructed_next_obs, latent_mu, latent_logvar = self.forward(history_observations)
-        actor_input = torch.cat([observations, v, z], dim=-1)
+        z_detached = z.detach()
+        actor_input = torch.cat([observations, v, z_detached], dim=-1)
 
         self.update_distribution(actor_input)
         return self.distribution.sample(), v, reconstructed_next_obs, latent_mu, latent_logvar
@@ -184,7 +184,8 @@ class ActorCriticDreamWaQ(nn.Module):
 
     def act_inference(self, observations, history_observations):
         v, z, _, _, _ = self.forward(history_observations)
-        actor_input = torch.cat([observations, v, z], dim=-1)
+        z_detached = z.detach()
+        actor_input = torch.cat([observations, v, z_detached], dim=-1)
         actions_mean = self.actor(actor_input)
         return actions_mean
 

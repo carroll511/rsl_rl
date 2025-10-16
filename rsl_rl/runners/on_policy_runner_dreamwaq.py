@@ -92,7 +92,7 @@ class OnPolicyRunnerDreamWaQ:
                     obs, privileged_obs, history_obs, velocity_targets, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, history_obs, velocity_targets, rewards, dones = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), velocity_targets.to(self.device), rewards.to(self.device), dones.to(self.device)
-                    self.alg.process_env_step(rewards, dones, infos, velocity_targets)
+                    self.alg.process_env_step(rewards, dones, infos)
 
                     if self.log_dir is not None:
                         # Book keeping

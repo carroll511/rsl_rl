@@ -112,8 +112,11 @@ class OnPolicyRunnerDreamWaQ:
                 # Learning step
                 start = stop
                 self.alg.compute_returns(critic_obs)
+            
+            rew_mu = statistics.mean(rewbuffer) if len(rewbuffer) > 10 else 0
+            rew_std = statistics.stdev(rewbuffer) if len(rewbuffer) > 10 else 1
 
-            mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss, mean_ce_loss = self.alg.update()
+            mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss, mean_ce_loss = self.alg.update(rew_mu, rew_std)
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:

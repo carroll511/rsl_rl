@@ -7,6 +7,9 @@ from rsl_rl.storage import RolloutStorage
 
 from collections import deque
 
+import math
+import random
+
 class PPODreamWaQ:
     actor_critic: ActorCriticDreamWaQ
     def __init__(self,
@@ -54,6 +57,9 @@ class PPODreamWaQ:
         # CENet parameters
         self.beta_coef = beta_coef
 
+        # Adaboot parameters
+        self.adaboot_prob = 0
+
         self.episode_reward_window = deque(maxlen=100)
 
     def init_storage(self, num_envs, num_transitions_per_env, history_len, actor_obs_shape, critic_obs_shape, action_shape):
@@ -67,11 +73,17 @@ class PPODreamWaQ:
 
     def act(self, obs, critic_obs, history_obs, velocity_targets):
     # def act(self, obs, critic_obs, history_obs):
+        if random.random() < self.adaboot_prob:
+            act_distribution, v, _, _, _ = self.actor_critic.act(obs, history_obs, bootstrap=True)
+            self.transition.actions = act_distribution.detach()
+            obs = torch.cat([v.detach(), obs[:, 3:]], dim=-1)
+        else:
+            act_distribution, _, _, _, _ = self.actor_critic.act(obs, history_obs, bootstrap=False)
+            self.transition.actions = act_distribution.detach()
+
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
-        # Compute the actions and values
-        act_distribution, _, _, _, _ = self.actor_critic.act(obs, history_obs)
-        self.transition.actions = act_distribution.detach()
+            
         # self.transition.actions = self.actor_critic.act(obs, history_obs).detach()
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
@@ -101,7 +113,7 @@ class PPODreamWaQ:
         last_values= self.actor_critic.evaluate(last_critic_obs).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
-    def update(self):
+    def update(self, rew_mu, rew_std):
         mean_value_loss = 0
         mean_surrogate_loss = 0
         # CENet
@@ -109,6 +121,8 @@ class PPODreamWaQ:
         mean_recon_loss = 0
         mean_kl_loss = 0
         mean_ce_loss = 0
+
+        self.adaboot_prob = 1 - math.tanh(rew_std / (rew_mu + 1e-7))
 
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -165,7 +179,8 @@ class PPODreamWaQ:
                 # CENet loss    
 
                 velocity_loss = nn.MSELoss()(predicted_velocity_batch, velocity_targets_batch)
-                recon_loss = nn.MSELoss()(reconstructed_obs_batch, critic_obs_batch[:, :45])
+                # print("reconstructed_obs_batch shape:", reconstructed_obs_batch.shape)
+                recon_loss = nn.MSELoss()(reconstructed_obs_batch, critic_obs_batch[:, 3:48])
                 kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
                 ce_loss = velocity_loss + 0.1*(recon_loss + kl_loss * self.beta_coef)
 

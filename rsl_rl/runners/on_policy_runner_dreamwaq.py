@@ -56,7 +56,7 @@ class OnPolicyRunnerDreamWaQ:
         # wandb init
         wandb.init(
             project="leggedgym_project",
-            name=self.cfg.get("exp_name", "a1_dreamwaq_feet_higher"),
+            name=self.cfg.get("exp_name", "a1_dreamwaq_adaptive"),
             config=train_cfg
         )
 
@@ -123,7 +123,10 @@ class OnPolicyRunnerDreamWaQ:
                 start = stop
                 self.alg.compute_returns(critic_obs)
 
-            mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss, mean_ce_loss = self.alg.update()
+            stats_mean = statistics.mean(rewbuffer) if len(rewbuffer) > 10 else 0
+            stats_std = statistics.stdev(rewbuffer) if len(rewbuffer) > 10 else 1
+
+            mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss, mean_ce_loss, mean_adaboot_probability = self.alg.update(stats_mean, stats_std)
             stop = time.time()
             learn_time = stop - start
             # if self.log_dir is not None:
@@ -141,6 +144,7 @@ class OnPolicyRunnerDreamWaQ:
                     'mean_recon_loss': mean_recon_loss,
                     'mean_kl_loss': mean_kl_loss,
                     'mean_ce_loss': mean_ce_loss,
+                    'mean_adaboot_probability': mean_adaboot_probability,
                 }
 
                 for key, values in reward_component_buffer.items():

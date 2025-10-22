@@ -25,7 +25,7 @@ class ActorCriticDreamWaQ(nn.Module):
         activation = get_activation(activation)
 
         # CENet
-        cenet_input_dim = (num_actor_obs - 3) * (history_len + 1)
+        cenet_input_dim = num_actor_obs * history_len
 
         # # Encoder
         # self.cenet_encoder = nn.Sequential(
@@ -73,13 +73,13 @@ class ActorCriticDreamWaQ(nn.Module):
             activation,
             nn.Linear(64, 128),
             activation,
-            nn.Linear(128, num_actor_obs-3),
+            nn.Linear(128, num_actor_obs),
         )
 
         print(f"[DreamWaQ] CENet Encoder: {self.cenet_encoder}")
         print(f"[DreamWaQ] CENet Decoder: {self.cenet_decoder}")
 
-        mlp_input_dim_a = num_actor_obs + latent_dims
+        mlp_input_dim_a = num_actor_obs + velocity_dims + latent_dims
         mlp_input_dim_c = num_critic_obs
 
         # Policy
@@ -171,26 +171,31 @@ class ActorCriticDreamWaQ(nn.Module):
         mean = self.actor(actor_input)
         self.distribution = Normal(mean, mean*0. + self.std)
 
-    def act(self, observations, history_observations, bootstrap=False, **kwargs):
-        # print("history_observations.shape:", history_observations.shape)
-        v, z, reconstructed_next_obs, latent_mu, latent_logvar = self.forward(history_observations)
-        # print("reconstructed_next_obs shape:", reconstructed_next_obs.shape)
+    def act(self, observations, history_observations, **kwargs):
+        v, z, reconstructed_next_obs, latent_mu, latent_logvar = self.forward(history_observations[:, 1:, :])
         z_detached = z.detach()
-        if bootstrap:
-            actor_input = torch.cat([observations[:, 3:], v, z_detached], dim=-1)
-        else:
-            actor_input = torch.cat([observations, z_detached], dim=-1)
+        actor_input = torch.cat([observations, v, z_detached], dim=-1)
 
         self.update_distribution(actor_input)
-        return self.distribution.sample(), v, reconstructed_next_obs, latent_mu, latent_logvar
+        return self.distribution.sample()
     
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def act_inference(self, observations, history_observations):
-        v, z, _, _, _ = self.forward(history_observations)
-        z_detached = z.detach()
-        actor_input = torch.cat([observations[3:], v, z_detached], dim=-1)
+        history_input = history_observations[:, 1:, :]
+        
+        batch_size = history_input.shape[0]
+        history_observations_flat = history_input.view(batch_size, -1)
+        encoded = self.cenet_encoder(history_observations_flat)
+
+        v = encoded[:, :3]
+        latent_mu = encoded[:, 3:19]
+
+        v_detached = v.detach()
+        mu_detached = latent_mu.detach()
+        
+        actor_input = torch.cat([observations, v_detached, mu_detached], dim=-1)
         actions_mean = self.actor(actor_input)
         return actions_mean
 

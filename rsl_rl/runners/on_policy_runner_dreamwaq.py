@@ -56,7 +56,7 @@ class OnPolicyRunnerDreamWaQ:
         # wandb init
         wandb.init(
             project="leggedgym_project",
-            name=self.cfg.get("exp_name", "a1_dreamwaq_change_commands"),
+            name=self.cfg.get("exp_name", "a1_dreamwaq_feet_higher"),
             config=train_cfg
         )
 

@@ -25,7 +25,7 @@ class ActorCriticDreamWaQ(nn.Module):
         activation = get_activation(activation)
 
         # CENet
-        cenet_input_dim = num_actor_obs * history_len
+        cenet_input_dim = (num_actor_obs - velocity_dims) * history_len
 
         # # Encoder
         # self.cenet_encoder = nn.Sequential(
@@ -73,13 +73,13 @@ class ActorCriticDreamWaQ(nn.Module):
             activation,
             nn.Linear(64, 128),
             activation,
-            nn.Linear(128, num_actor_obs),
+            nn.Linear(128, num_actor_obs - velocity_dims),
         )
 
         print(f"[DreamWaQ] CENet Encoder: {self.cenet_encoder}")
         print(f"[DreamWaQ] CENet Decoder: {self.cenet_decoder}")
 
-        mlp_input_dim_a = num_actor_obs + velocity_dims + latent_dims
+        mlp_input_dim_a = num_actor_obs + latent_dims
         mlp_input_dim_c = num_critic_obs
 
         # Policy
@@ -171,10 +171,14 @@ class ActorCriticDreamWaQ(nn.Module):
         mean = self.actor(actor_input)
         self.distribution = Normal(mean, mean*0. + self.std)
 
-    def act(self, observations, history_observations, **kwargs):
+    def act(self, observations, history_observations, bootstrap=False, **kwargs):
         v, z, reconstructed_next_obs, latent_mu, latent_logvar = self.forward(history_observations[:, 1:, :])
         z_detached = z.detach()
-        actor_input = torch.cat([observations, v, z_detached], dim=-1)
+        if bootstrap:
+            actor_input = torch.cat([observations[:, :45], v, z_detached], dim=-1)
+            self.bootstrapped_obs = torch.cat([v, observations[:, :45]], dim=-1)
+        else:
+            actor_input = torch.cat([observations, z_detached], dim=-1)
 
         self.update_distribution(actor_input)
         return self.distribution.sample()
@@ -194,8 +198,8 @@ class ActorCriticDreamWaQ(nn.Module):
 
         v_detached = v.detach()
         mu_detached = latent_mu.detach()
-        
-        actor_input = torch.cat([observations, v_detached, mu_detached], dim=-1)
+
+        actor_input = torch.cat([observations[:, :45], v_detached, mu_detached], dim=-1)
         actions_mean = self.actor(actor_input)
         return actions_mean
 

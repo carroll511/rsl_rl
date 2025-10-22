@@ -63,13 +63,17 @@ class RolloutStorage:
         self.actions_shape = actions_shape
         # print(self.obs_shape)
 
+        history_obs_shape = list(obs_shape)
+        history_obs_shape[-1] -= 3
+        history_obs_shape = tuple(history_obs_shape)
+
         # Core
         self.observations = torch.zeros(num_transitions_per_env, num_envs, *obs_shape, device=self.device)
         if privileged_obs_shape[0] is not None:
             self.privileged_observations = torch.zeros(num_transitions_per_env, num_envs, *privileged_obs_shape, device=self.device)
         else:
             self.privileged_observations = None
-        self.history_observations = torch.zeros(num_transitions_per_env, num_envs, history_len + 1, *obs_shape, device=self.device)
+        self.history_observations = torch.zeros(num_transitions_per_env, num_envs, history_len + 1, *history_obs_shape, device=self.device)
         self.rewards = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()

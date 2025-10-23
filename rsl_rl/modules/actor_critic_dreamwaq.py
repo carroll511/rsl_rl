@@ -176,7 +176,7 @@ class ActorCriticDreamWaQ(nn.Module):
         z_detached = z.detach()
         if bootstrap:
             actor_input = torch.cat([observations[:, :45], v, z_detached], dim=-1)
-            self.bootstrapped_obs = torch.cat([v, observations[:, :45]], dim=-1)
+            self.bootstrapped_obs = torch.cat([observations[:, :45], v], dim=-1)
         else:
             actor_input = torch.cat([observations, z_detached], dim=-1)
 

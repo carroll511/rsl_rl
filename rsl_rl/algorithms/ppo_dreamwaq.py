@@ -71,14 +71,14 @@ class PPODreamWaQ:
 
     def act(self, obs, critic_obs, history_obs):
         if random.random() < self.adaboot_probability:
-            self.transition.actions = self.actor_critic.act(obs, history_obs, bootstrap_est=True).detach()
+            self.transition.actions = self.actor_critic.act(obs, history_obs, bootstrap=True).detach()
             obs = self.actor_critic.bootstrapped_obs
         else:
-            self.transition.actions = self.actor_critic.act(obs, history_obs, bootstrap_est=False).detach()
+            self.transition.actions = self.actor_critic.act(obs, history_obs, bootstrap=False).detach()
         # Compute the actions and values
         # act_distribution, _, _, _, _ = self.actor_critic.act(obs, history_obs)
         # self.transition.actions = act_distribution.detach()
-        self.transition.actions = self.actor_critic.act(obs, history_obs).detach()
+        # self.transition.actions = self.actor_critic.act(obs, history_obs).detach()
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()

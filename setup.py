@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-setup(name='rsl_rl',
+setup(name='rsl-rl-lib',
       version='1.0.2',
       author='Nikita Rudin',
       author_email='rudinn@ethz.ch',

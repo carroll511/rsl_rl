@@ -7,6 +7,9 @@ from rsl_rl.storage import RolloutStorage
 
 from collections import deque
 
+import math
+import random
+
 class PPODreamWaQ:
     actor_critic: ActorCriticDreamWaQ
     def __init__(self,
@@ -65,11 +68,12 @@ class PPODreamWaQ:
     def train_mode(self):
         self.actor_critic.train()
 
-    # def act(self, obs, critic_obs, history_obs, velocity_targets):
     def act(self, obs, critic_obs, history_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
+        # act_distribution, _, _, _, _ = self.actor_critic.act(obs, history_obs)
+        # self.transition.actions = act_distribution.detach()
         self.transition.actions = self.actor_critic.act(obs, history_obs).detach()
         self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
@@ -79,8 +83,21 @@ class PPODreamWaQ:
         self.transition.observations = obs
         self.transition.history_observations = history_obs
         self.transition.critic_observations = critic_obs
-        # self.transition.velocity_targets = velocity_targets
         return self.transition.actions
+
+    # def act(self, obs, critic_obs):
+    #     # Compute the actions and values
+    #     # act_distribution, _, _, _, _ = self.actor_critic.act(obs, history_obs)
+    #     # self.transition.actions = act_distribution.detach()
+    #     self.transition.actions = self.actor_critic.act(obs).detach()
+    #     self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
+    #     self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
+    #     self.transition.action_mean = self.actor_critic.action_mean.detach()
+    #     self.transition.action_sigma = self.actor_critic.action_std.detach()
+    #     # need to record obs and critic_obs before env.step()
+    #     self.transition.observations = obs
+    #     self.transition.critic_observations = critic_obs
+    #     return self.transition.actions
     
     def process_env_step(self, rewards, dones, infos):
         self.transition.rewards = rewards.clone()
@@ -114,6 +131,19 @@ class PPODreamWaQ:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, history_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
+                
+                # CENet loss
+                # v_est, reconstructed_next_obs, latent_mu, latent_logvar
+                predicted_velocity_batch, _, reconstructed_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch[:, 1:, :])
+
+                velocity_target = critic_obs_batch[:, 45:48].detach()
+                velocity_loss = nn.MSELoss()(predicted_velocity_batch, velocity_target)
+
+                recon_target = critic_obs_batch[:, :45].detach()
+                recon_loss = nn.MSELoss()(reconstructed_obs_batch, recon_target)
+
+                kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
+                ce_loss = velocity_loss + 0.1*(recon_loss + kl_loss * self.beta_coef)
             
                 # predicted_velocity_batch, _, reconstructed_next_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
 
@@ -125,7 +155,7 @@ class PPODreamWaQ:
                 sigma_batch = self.actor_critic.action_std
                 entropy_batch = self.actor_critic.entropy
 
-                predicted_velocity_batch, _, reconstructed_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
+                # predicted_velocity_batch, _, reconstructed_obs_batch, latent_mu, logvar = self.actor_critic.forward(history_obs_batch)
 
                 # KL
                 if self.desired_kl != None and self.schedule == 'adaptive':
@@ -159,12 +189,6 @@ class PPODreamWaQ:
                     value_loss = torch.max(value_losses, value_losses_clipped).mean()
                 else:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
-
-                # CENet loss                
-                velocity_loss = nn.MSELoss()(predicted_velocity_batch, critic_obs_batch[:, 45:48])
-                recon_loss = nn.MSELoss()(reconstructed_obs_batch, critic_obs_batch[:, :45])
-                kl_loss = -0.5 * torch.mean(1 + logvar - latent_mu.pow(2) - logvar.exp())
-                ce_loss = velocity_loss + 0.1*(recon_loss + kl_loss * self.beta_coef)
 
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + ce_loss
 

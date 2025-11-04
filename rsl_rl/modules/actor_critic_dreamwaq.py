@@ -25,7 +25,7 @@ class ActorCriticDreamWaQ(nn.Module):
         activation = get_activation(activation)
 
         # CENet
-        cenet_input_dim = num_actor_obs * (history_len + 1)
+        cenet_input_dim = num_actor_obs * history_len
 
         # # Encoder
         # self.cenet_encoder = nn.Sequential(
@@ -172,9 +172,9 @@ class ActorCriticDreamWaQ(nn.Module):
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, history_observations, **kwargs):
-
-        v, z, _, _, _ = self.forward(history_observations)
-        actor_input = torch.cat([observations, v, z], dim=-1)
+        v, z, reconstructed_next_obs, latent_mu, latent_logvar = self.forward(history_observations[:, 1:, :])
+        z_detached = z.detach()
+        actor_input = torch.cat([observations, v, z_detached], dim=-1)
 
         self.update_distribution(actor_input)
         return self.distribution.sample()
@@ -183,8 +183,19 @@ class ActorCriticDreamWaQ(nn.Module):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def act_inference(self, observations, history_observations):
-        v, z, _, _, _ = self.forward(history_observations)
-        actor_input = torch.cat([observations, v, z], dim=-1)
+        history_input = history_observations[:, 1:, :]
+        
+        batch_size = history_input.shape[0]
+        history_observations_flat = history_input.view(batch_size, -1)
+        encoded = self.cenet_encoder(history_observations_flat)
+
+        v = encoded[:, :3]
+        latent_mu = encoded[:, 3:19]
+
+        v_detached = v.detach()
+        mu_detached = latent_mu.detach()
+        
+        actor_input = torch.cat([observations, v_detached, mu_detached], dim=-1)
         actions_mean = self.actor(actor_input)
         return actions_mean
 

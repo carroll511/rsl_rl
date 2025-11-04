@@ -58,6 +58,7 @@ class RolloutStorage:
         self.device = device
 
         self.obs_shape = obs_shape
+        # print("History obs shape:", self.history_obs_shape)
         self.privileged_obs_shape = privileged_obs_shape
         self.actions_shape = actions_shape
         # print(self.obs_shape)

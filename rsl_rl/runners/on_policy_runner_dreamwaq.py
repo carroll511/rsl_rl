@@ -1,6 +1,6 @@
 import time
 import os
-from collections import deque
+from collections import deque, defaultdict
 import statistics
 
 import torch
@@ -56,23 +56,24 @@ class OnPolicyRunnerDreamWaQ:
         # wandb init
         wandb.init(
             project="leggedgym_project",
-            name=self.cfg.get("exp_name", "a1_dreamwaq_cenet_test"),
+            name=self.cfg.get("exp_name", "a1_dreamwaq_feet_higher"),
             config=train_cfg
         )
 
-        _, _, _ = self.env.reset()
+        _, _, _= self.env.reset()
 
         # print("[DEBUG] Using OnPolicyRunnerDreamWaQ")
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
+
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
         history_obs = self.env.get_history_observations()
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs, history_obs = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device)
-        
+
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
 
         ep_infos = []
@@ -84,14 +85,24 @@ class OnPolicyRunnerDreamWaQ:
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
             start = time.time()
+
+            reward_component_buffer = defaultdict(list)
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, critic_obs, history_obs)
-                    obs, privileged_obs, history_obs, rewards, dones, infos = self.env.step(actions)
+
+                    # obs, privileged_obs, history_obs, rewards, dones, infos = self.env.step(actions)
+                    obs, privileged_obs, new_history_obs, rewards, dones, infos = self.env.step(actions)
+
                     critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, history_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), history_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    obs, critic_obs, history_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), new_history_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+
                     self.alg.process_env_step(rewards, dones, infos)
+
+                    if 'reward_components' in infos:
+                        for key, value in infos['reward_components'].items():
+                            reward_component_buffer[key].append(value)
 
                     if self.log_dir is not None:
                         # Book keeping
@@ -115,8 +126,29 @@ class OnPolicyRunnerDreamWaQ:
             mean_value_loss, mean_surrogate_loss, mean_velocity_loss, mean_recon_loss, mean_kl_loss, mean_ce_loss = self.alg.update()
             stop = time.time()
             learn_time = stop - start
+            # if self.log_dir is not None:
+            #     self.log(locals())
             if self.log_dir is not None:
-                self.log(locals())
+                log_data = {
+                    'it': it,
+                    'rewbuffer': rewbuffer,
+                    'lenbuffer': lenbuffer,
+                    'collection_time': collection_time,
+                    'learn_time': learn_time,
+                    'mean_value_loss': mean_value_loss,
+                    'mean_surrogate_loss': mean_surrogate_loss,
+                    'mean_velocity_loss': mean_velocity_loss,
+                    'mean_recon_loss': mean_recon_loss,
+                    'mean_kl_loss': mean_kl_loss,
+                    'mean_ce_loss': mean_ce_loss,
+                }
+
+                for key, values in reward_component_buffer.items():
+                    if values:
+                        log_data[key] = statistics.mean(values)
+
+                self.log(log_data)
+
             if it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
             ep_infos.clear()
@@ -153,6 +185,25 @@ class OnPolicyRunnerDreamWaQ:
             if len(rewbuffer) > 0:
                 log_dict["Train/mean_reward"] = statistics.mean(rewbuffer)
                 log_dict["Train/mean_episode_length"] = statistics.mean(lenbuffer)
+
+            reward_keys = [
+                'tracking_lin_vel',
+                'tracking_ang_vel',
+                'lin_vel_z',
+                'ang_vel_xy',
+                'orientation',
+                'dof_acc',
+                'dof_power',
+                'base_height',
+                'foot_clearance',
+                'action_rate',
+                'smoothness',
+                'power_distribution'
+            ]
+
+            for key in reward_keys:
+                if key in locs:
+                    log_dict[f"Reward/{key}"] = locs[key]
 
             wandb.log(log_dict)
 
